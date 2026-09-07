@@ -12,16 +12,36 @@
 ## argument when executing programs with other wrappers, such as faketime or torsocks.
 #### meta end
 
-if [ ! "$uwtwrapper_verbose" = "" ]; then
-   if [ "$uwtwrapper_verbose" -ge 1 ]; then
+## style-ok: allow-exec -- this script exists ONLY to re-exec the wrapped
+## program with argv[0] preserved.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+
+uwtwrapper_verbose="${uwtwrapper_verbose:-}"
+if [ -z "${uwtwrapper_zeroarg:-}" ]; then
+  printf '%s\n' 'uwtwrapper_zeroarg is required'
+  exit 1
+fi
+if [ -z "${uwtwrapper_parent:-}" ]; then
+  printf '%s\n' 'uwtwrapper_parent is required'
+  exit 1
+fi
+
+if [ ! "${uwtwrapper_verbose}" = "" ]; then
+   if [ "${uwtwrapper_verbose}" -ge 1 ]; then
       set -x
    fi
 fi
 
 true "$0: START"
-true "$0: uwtwrapper_zeroarg: $uwtwrapper_zeroarg"
-true "$0: uwtwrapper_parent: $uwtwrapper_parent"
+true "$0: uwtwrapper_zeroarg: ${uwtwrapper_zeroarg}"
+true "$0: uwtwrapper_parent: ${uwtwrapper_parent}"
 
 ## Execute $uwtwrapper_parent.anondist-orig with the zeroth argument set to
 ## $uwtwrapper_zeroarg and the other arguments set to $@.
-exec -a "$uwtwrapper_zeroarg" "$uwtwrapper_parent.anondist-orig" "$@"
+exec -a "${uwtwrapper_zeroarg}" "${uwtwrapper_parent}.anondist-orig" "$@"

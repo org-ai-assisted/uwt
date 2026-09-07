@@ -3,32 +3,42 @@
 ## Copyright (C) 2012 - 2025 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
 ## See the file COPYING for copying conditions.
 
-set -e
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
 
 shopt -s nullglob
 for i in /etc/uwt.d/*.conf /usr/local/etc/uwt.d/*.conf; do
-   bash -n "$i"
-   source "$i"
+   bash -n "${i}"
+   # shellcheck disable=SC1090
+   source "${i}"
 done
 
-if [ $uwtwrapper_global = "1" ]; then
+uwtwrapper_global="${uwtwrapper_global:-}"
+UWT_DEV_PASSTHROUGH="${UWT_DEV_PASSTHROUGH:-}"
+enabled=false
+
+if [ "${uwtwrapper_global}" = "1" ]; then
    enabled=true
 fi
 
-if [ "$UWT_DEV_PASSTHROUGH" = "1" ]; then
+if [ "${UWT_DEV_PASSTHROUGH}" = "1" ]; then
    enabled=false
 fi
 
-if [ "$enabled" = "true" ]; then
+if [ "${enabled}" = "true" ]; then
 #### meta start
 #### project Whonix
 #### category networking
 #### description
 
-   echo "uwt INFO: Stream isolation for some applications enabled. uwt / torsocks will be automatically prepended to some commands. What is that? See:"
-   echo "uwt INFO: https://www.whonix.org/wiki/Stream_Isolation/Easy"
+   printf '%s\n' "uwt INFO: Stream isolation for some applications enabled. uwt / torsocks will be automatically prepended to some commands. What is that? See:"
+   printf '%s\n' "uwt INFO: https://www.whonix.org/wiki/Stream_Isolation/Easy"
 
 #### meta end
 else
-   echo "uwt INFO: disabled."
+   printf '%s\n' "uwt INFO: disabled."
 fi

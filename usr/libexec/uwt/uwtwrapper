@@ -55,35 +55,66 @@
 ##   upstream to the Debian package 'faketime'. This is to avoid a conflict when
 ##   the new file 'timeprivacy' gets installed by 'faketime'.
 
-if [ ! "$uwtwrapper_verbose" = "" ]; then
-   if [ "$uwtwrapper_verbose" -ge 1 ]; then
+## style-ok: allow-exec -- transparent wrapper.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+export LC_ALL=C
+
+# shellcheck source=../../../../../kicksecure/helper-scripts/usr/libexec/helper-scripts/strings.bsh
+source /usr/libexec/helper-scripts/strings.bsh
+
+default_if_empty uwtwrapper_verbose ""
+default_if_empty uwtwrapper_parent ""
+default_if_empty uwtwrapper_zeroarg ""
+default_if_empty uwtwrapper_counter ""
+default_if_empty uwtwrapper_max ""
+default_if_empty uwtwrapper_global ""
+default_if_empty timeprivacy_global ""
+default_if_empty torsocks_bin "torsocks"
+default_if_empty uwtexec_bin "/usr/libexec/uwt/uwtexec"
+default_if_empty bindp_dispatch ""
+default_if_empty bindp_so ""
+default_if_empty bindp_interface ""
+default_if_empty fake_time ""
+default_if_empty privacy_time ""
+default_if_empty BIND_ADDR ""
+default_if_empty LD_PRELOAD ""
+default_if_empty TORSOCKS_LOG_LEVEL "1"
+default_if_empty UWT_DEV_PASSTHROUGH ""
+default_if_empty SCRIPTNAME_CLEANED ""
+
+if [ ! "${uwtwrapper_verbose}" = "" ]; then
+   if [ "${uwtwrapper_verbose}" -ge 1 ]; then
       set -x
    fi
 fi
 
-true "$0: START"
+true "${0}: START"
 
-set -e
+# shellcheck source=../../../../../kicksecure/helper-scripts/usr/libexec/helper-scripts/strings.bsh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/strings.bsh
+# shellcheck source=../../../../../kicksecure/helper-scripts/usr/libexec/helper-scripts/has.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
 
-source /usr/libexec/helper-scripts/strings.bsh
+SCRIPTNAME="$(basename -- "${BASH_SOURCE[0]}")"
 
 error_handler() {
-   echo "
+   printf '%s\n' "
 ## uwtwrapper BUG.
-## SCRIPTNAME: '$SCRIPTNAME'
-## uwtwrapper_parent: '$uwtwrapper_parent'
-## BASH_COMMAND: '$BASH_COMMAND'
+## SCRIPTNAME: '${SCRIPTNAME}'
+## uwtwrapper_parent: '${uwtwrapper_parent}'
+## BASH_COMMAND: '${BASH_COMMAND}'
 ## Please report this BUG!
 "
    exit 1
 }
 
-trap "error_handler" ERR
-
-set -o pipefail
-set -o errtrace
-
-SCRIPTNAME="$(basename -- "$BASH_SOURCE")"
+trap error_handler ERR
 
 preparation() {
    declare -A -g timeprivacy
@@ -91,29 +122,33 @@ preparation() {
    declare -A -g bindp_use
 
    ## Keep for backwards compatibility with legacy config files.
+   # shellcheck disable=SC2034
    declare -A -g uwtport
 }
 
 source_config_folder() {
+   local uwt_config_file
+
    shopt -s nullglob
-   for i in /etc/uwt.d/*.conf /usr/local/etc/uwt.d/*.conf; do
-      bash -n "$i"
-      source "$i"
+   for uwt_config_file in /etc/uwt.d/*.conf /usr/local/etc/uwt.d/*.conf; do
+      bash -n "${uwt_config_file}"
+      # shellcheck disable=SC1090
+      source "${uwt_config_file}"
    done
 }
 
 show_help() {
-   echo "\
-$0 help.
+   printf '%s\n' "\
+${0} help.
 
-$0 is not supposed to be used manually by users.
+${0} is not supposed to be used manually by users.
 Manual usage is difficult. Use uwt instead. See:
 man uwt
 
 If you are a very advanced user or developer, who wants to learn more about
 uwt wrappers, read ahead.
 
-uwtwrappers and $0 are hacks to socksify applications that do
+uwtwrappers and ${0} are hacks to socksify applications that do
 not support native socks proxy settings. Used to implement Stream Isolation.
 https://www.whonix.org/wiki/Stream_Isolation
 
@@ -146,26 +181,26 @@ parse_cmd() {
    ## manually called from the command line instead of by a wrapper. Otherwise, it would
    ## interfere with the forwarded options to the application. For example,
    ## 'apt-get --help' would break.
-   if [ ! "$uwtwrapper_parent" = "" ]; then
+   if [ ! "${uwtwrapper_parent}" = "" ]; then
       return 0
    fi
 
    ## Thanks to:
    ## https://mywiki.wooledge.org/BashFAQ/035
 
-   while true;
-   do
-      case $1 in
-         -h|-\?|--help)
+   while true; do
+      case "${1-}" in
+         -h|'-?'|--help)
             show_help
             exit 0
             ;;
-        --)
+         --)
             shift
             break
             ;;
-        *)
+         *)
             break
+            ;;
       esac
       shift
    done
@@ -175,27 +210,25 @@ parse_cmd() {
 }
 
 nested_protection() {
-   [ -n "$uwtwrapper_max" ] || uwtwrapper_max=10
-   is_whole_number "$uwtwrapper_counter" || uwtwrapper_counter=0
+   [ -n "${uwtwrapper_max}" ] || uwtwrapper_max=10
+   is_whole_number "${uwtwrapper_counter}" || uwtwrapper_counter=0
    uwtwrapper_counter=$(( uwtwrapper_counter + 1 ))
    export uwtwrapper_counter
-   if [ "$uwtwrapper_counter" -ge "$uwtwrapper_max" ]; then
-      echo "$SCRIPTNAME uwt wrapper ERROR: More than uwtwrapper_counter '$uwtwrapper_counter' nested executions (uwtwrapper_max: '$uwtwrapper_max')."
+   if [ "${uwtwrapper_counter}" -ge "${uwtwrapper_max}" ]; then
+      printf '%s\n' "${SCRIPTNAME} uwt wrapper ERROR: More than uwtwrapper_counter '${uwtwrapper_counter}' nested executions (uwtwrapper_max: '${uwtwrapper_max}')."
       exit 255
    fi
 }
 
 variables() {
+   local readlink_result bindp_use_item
+
    ## Disable torsocks warning spam such as:
    ## [May 20 11:45:27] WARNING torsocks[2645]: [syscall] Unsupported syscall number 224. Denying the call (in tsocks_syscall() at syscall.c:165)
    ## https://forums.whonix.org/t/disable-torsocks-warning-spam/19084
-   [ -n "$TORSOCKS_LOG_LEVEL" ] || TORSOCKS_LOG_LEVEL=1
    export TORSOCKS_LOG_LEVEL
 
-   [ -n "$torsocks_bin" ] || torsocks_bin=torsocks
-   [ -n "$uwtexec_bin" ] || uwtexec_bin=/usr/libexec/uwt/uwtexec
-
-   if [ "$UWT_DEV_PASSTHROUGH" = "1" ]; then
+   if [ "${UWT_DEV_PASSTHROUGH}" = "1" ]; then
       torsocks_bin=""
    fi
 
@@ -211,58 +244,57 @@ variables() {
    ## Export the zeroth argument for use in the uwtexec script.
    ## This allows uwtexec to supply the original zeroth argument.
    ## https://forums.whonix.org/t/issue-with-symbolic-links/18637
-   [ -n "$uwtwrapper_zeroarg" ] || uwtwrapper_zeroarg="$uwtwrapper_parent"
+   [ -n "${uwtwrapper_zeroarg}" ] || uwtwrapper_zeroarg="${uwtwrapper_parent}"
    export uwtwrapper_zeroarg
 
    ## uwtwrapper_parent example:
    ## /usr/bin/gpg2
 
-   true "$0: Checking whether uwtwrapper_parent $uwtwrapper_parent is a symlink."
+   true "${0}: Checking whether uwtwrapper_parent ${uwtwrapper_parent} is a symlink."
    ## (For example, '/usr/bin/git-receive-pack' is actually a symlink to 'git'.)
-   if test -h "$uwtwrapper_parent" ; then
-      true "$0: Yes, it is a symlink."
-      local readlink_result
-      if readlink_result="$(readlink "$uwtwrapper_parent")" ; then
+   if test -h "${uwtwrapper_parent}" ; then
+      true "${0}: Yes, it is a symlink."
+      if readlink_result="$(readlink "${uwtwrapper_parent}")" ; then
          ## readlink_result example:
          ## git
-         true "$0: Checking whether $uwtwrapper_parent.anondist has a uwt wrapper script."
-         if [ -e "$uwtwrapper_parent.anondist" ]; then
-            true "$0: Yes, uwtwrapper_parent $uwtwrapper_parent has a uwt wrapper script."
+         true "${0}: Checking whether ${uwtwrapper_parent}.anondist has a uwt wrapper script."
+         if [ -e "${uwtwrapper_parent}.anondist" ]; then
+            true "${0}: Yes, uwtwrapper_parent ${uwtwrapper_parent} has a uwt wrapper script."
          else
-            true "$0: No, uwtwrapper_parent $uwtwrapper_parent does not have a uwt wrapper script."
-            true "$0: Therefore, execute the target of the symlink for uwtwrapper_parent $uwtwrapper_parent."
-            exec "$readlink_result" "$@"
+            true "${0}: No, uwtwrapper_parent ${uwtwrapper_parent} does not have a uwt wrapper script."
+            true "${0}: Therefore, execute the target of the symlink for uwtwrapper_parent ${uwtwrapper_parent}."
+            exec "${readlink_result}" "$@"
          fi
       fi
    else
-      true "$0: No, it is not a symlink."
+      true "${0}: No, it is not a symlink."
    fi
 
-   true "$0: Checking whether uwtwrapper_parent.anondist-orig $uwtwrapper_parent.anondist-orig is a symlink."
+   true "${0}: Checking whether uwtwrapper_parent.anondist-orig ${uwtwrapper_parent}.anondist-orig is a symlink."
    ## (For example, '/usr/bin/gpg2.anondist-orig' is actually a symlink to 'gpg'.)
-   if test -h "$uwtwrapper_parent.anondist-orig" ; then
-      true "$0: Yes, it is a symlink."
-      local readlink_result
-      if readlink_result="$(readlink "$uwtwrapper_parent.anondist-orig")" ; then
+   if test -h "${uwtwrapper_parent}.anondist-orig" ; then
+      true "${0}: Yes, it is a symlink."
+      if readlink_result="$(readlink "${uwtwrapper_parent}.anondist-orig")" ; then
          ## readlink_result example:
          ## gpg
-         true "$0: Therefore, execute readlink_result: $readlink_result."
-         exec "$readlink_result" "$@"
+         true "${0}: Therefore, execute readlink_result: ${readlink_result}."
+         exec "${readlink_result}" "$@"
       fi
    else
-      true "$0: No, it is not a symlink."
+      true "${0}: No, it is not a symlink."
    fi
 
-   [ -n "$timeprivacy_global" ] || timeprivacy_global="0"
-   [ -n "$uwtwrapper_global" ] || uwtwrapper_global="1"
+   [ -n "${timeprivacy_global}" ] || timeprivacy_global="0"
+   [ -n "${uwtwrapper_global}" ] || uwtwrapper_global="1"
 
-   [ -n "${bindp_use["/usr/bin/onionshare"]}" ] || bindp_use["/usr/bin/onionshare"]="true"
-   [ -n "${bindp_use["/usr/bin/onionshare-gui"]}" ] || bindp_use["/usr/bin/onionshare-gui"]="true"
-   [ -n "${bindp_use["/usr/bin/ricochet"]}" ] || bindp_use["/usr/bin/ricochet"]="true"
+   ## An absent key is the normal case here.
+   [ -n "${bindp_use["/usr/bin/onionshare"]-}" ] || bindp_use["/usr/bin/onionshare"]="true"
+   [ -n "${bindp_use["/usr/bin/onionshare-gui"]-}" ] || bindp_use["/usr/bin/onionshare-gui"]="true"
+   [ -n "${bindp_use["/usr/bin/ricochet"]-}" ] || bindp_use["/usr/bin/ricochet"]="true"
 
    for bindp_use_item in "${!bindp_use[@]}" ; do
-     if [ "$uwtwrapper_parent" = "$bindp_use_item" ]; then
-        if [ "${bindp_use[$bindp_use_item]}" = "true" ]; then
+     if [ "${uwtwrapper_parent}" = "${bindp_use_item}" ]; then
+        if [ "${bindp_use[${bindp_use_item}]}" = "true" ]; then
            bindp_dispatch="true"
            break
         fi
@@ -271,7 +303,9 @@ variables() {
 }
 
 alternatives_support() {
-   if [ ! -e "$uwtwrapper_parent.anondist-orig" ]; then
+   local readlink_result
+
+   if [ ! -e "${uwtwrapper_parent}.anondist-orig" ]; then
       ## For example, /usr/bin/aptitude.anondist-orig does not exist.
 
       ## Example basename_uwtwrapper_parent:
@@ -279,36 +313,35 @@ alternatives_support() {
       basename_uwtwrapper_parent="${uwtwrapper_parent##*/}"
 
       ## Let's see if /usr/bin/aptitude is actually a symlink to /etc/alternatives/aptitude.
-      if [ -e "/etc/alternatives/$basename_uwtwrapper_parent" ]; then
-         local readlink_result
+      if [ -e "/etc/alternatives/${basename_uwtwrapper_parent}" ]; then
          ## Let's see where, for example, /etc/alternatives/aptitude links to and use it.
-         if readlink_result="$(readlink "/etc/alternatives/$basename_uwtwrapper_parent")" ; then
+         if readlink_result="$(readlink "/etc/alternatives/${basename_uwtwrapper_parent}")" ; then
             ## The symlink could be read. Let's use it.
-            uwtwrapper_parent="$readlink_result"
+            uwtwrapper_parent="${readlink_result}"
          fi
       fi
    fi
 }
 
 sanity_tests_general() {
-   if [ "$uwtwrapper_parent" = "" ]; then
-      echo "ERROR: You are not supposed to run '$0' manually from the command line."
-      echo "See:" >&2
-      echo "$0 --help" >&2
+   if [ "${uwtwrapper_parent}" = "" ]; then
+      printf '%s\n' "ERROR: You are not supposed to run '${0}' manually from the command line."
+      printf '%s\n' "See:" >&2
+      printf '%s\n' "${0} --help" >&2
       exit 255
    fi
-   if [ ! -e "$uwtwrapper_parent.anondist-orig" ]; then
+   if [ ! -e "${uwtwrapper_parent}.anondist-orig" ]; then
       ## Example basename_uwtwrapper_parent:
       ## aptitude
       basename_uwtwrapper_parent="${uwtwrapper_parent##*/}"
-      if ! command -v command-not-found >/dev/null 2>/dev/null ; then
-         echo "$SCRIPTNAME uwt wrapper ERROR: file '$uwtwrapper_parent.anondist-orig' does not exist.
+      if ! has command-not-found ; then
+         printf '%s\n' "${SCRIPTNAME} uwt wrapper ERROR: file '${uwtwrapper_parent}.anondist-orig' does not exist.
 
-Is the package that includes file '$uwtwrapper_parent' installed?
+Is the package that includes file '${uwtwrapper_parent}' installed?
 
-Just a guess: Perhaps install the '$basename_uwtwrapper_parent' package?
+Just a guess: Perhaps install the '${basename_uwtwrapper_parent}' package?
 sudo apt update
-sudo apt install $basename_uwtwrapper_parent
+sudo apt install ${basename_uwtwrapper_parent}
 
 'command-not-found' is a tool that might be able to suggest the name of the missing package. But it is not installed either. The user could consider to install 'command-not-found' as per documentation:
 https://www.kicksecure.com/wiki/Command-not-found"
@@ -316,10 +349,10 @@ https://www.kicksecure.com/wiki/Command-not-found"
       fi
       ## --ignore-installed is used, because the uwt wrapper (for example
       ## /usr/bin/aptitude) will already be installed.
-      exec command-not-found --ignore-installed "$basename_uwtwrapper_parent"
+      exec command-not-found --ignore-installed "${basename_uwtwrapper_parent}"
    fi
-   if [ ! -x "$uwtwrapper_parent.anondist-orig" ]; then
-      echo "$SCRIPTNAME uwt wrapper ERROR: file '$uwtwrapper_parent.anondist-orig' is not executable."
+   if [ ! -x "${uwtwrapper_parent}.anondist-orig" ]; then
+      printf '%s\n' "${SCRIPTNAME} uwt wrapper ERROR: file '${uwtwrapper_parent}.anondist-orig' is not executable."
       exit 1
    fi
 }
@@ -332,26 +365,29 @@ variables "$@"
 alternatives_support "$@"
 sanity_tests_general "$@"
 
-if [ "$bindp_dispatch" = "true" ]; then
+if [ "${bindp_dispatch}" = "true" ]; then
    ## https://github.com/Kicksecure/bindp
    ## https://forums.whonix.org/t/find-way-to-have-tor-ephermal-hidden-service-using-applications-in-whonix-workstation-bind-on-all-interfaces/18846
-   [ -n "$bindp_so" ] || bindp_so="/usr/lib/libindp.so"
-   [ -n "$bindp_interface" ] || bindp_interface="eth0"
+   [ -n "${bindp_so}" ] || bindp_so="/usr/lib/libindp.so"
+   [ -n "${bindp_interface}" ] || bindp_interface="eth0"
    ## TODO: IPv6
-   [ -n "$BIND_ADDR" ] || BIND_ADDR="$(/sbin/ifconfig "$bindp_interface" | grep -oP 'inet \K\S+')" || true
-   [ -n "$BIND_ADDR" ] || BIND_ADDR="127.0.0.1"
-   LD_PRELOAD+=" $bindp_so"
+   [ -n "${BIND_ADDR}" ] || BIND_ADDR="$(/sbin/ifconfig "${bindp_interface}" | grep -oP 'inet \K\S+')" || true
+   [ -n "${BIND_ADDR}" ] || BIND_ADDR="127.0.0.1"
+   LD_PRELOAD+=" ${bindp_so}"
    ## The environment variable BIND_ADDR is used by bindp.
    export BIND_ADDR
    export LD_PRELOAD
-   exec $uwtexec_bin "$@"
+   ## uwtexec_bin may carry a wrapper plus its own arguments.
+   # shellcheck disable=SC2086
+   exec ${uwtexec_bin} "$@"
 fi
 
-if [ "${timeprivacy["$uwtwrapper_parent"]}" = "1" ]; then
+## An application with no entry in the timeprivacy map is the normal case.
+if [ "${timeprivacy["${uwtwrapper_parent}"]-}" = "1" ]; then
    fake_time="faketime"
-   privacy_time="$("time_privacy" -f ~"/.timeprivacy/$SCRIPTNAME_CLEANED")"
+   privacy_time="$("time_privacy" -f ~"/.timeprivacy/${SCRIPTNAME_CLEANED}")"
 else
-   if [ "$timeprivacy_global" = "1" ]; then
+   if [ "${timeprivacy_global}" = "1" ]; then
       fake_time="faketime"
       privacy_time="$("time_privacy")"
    else
@@ -360,24 +396,31 @@ else
    fi
 fi
 
-if [ "$uwtwrapper_global" = "0" ]; then
-   if [ "$fake_time" = "faketime" ]; then
-      exec "$fake_time" "$privacy_time" $uwtexec_bin "$@"
+if [ "${uwtwrapper_global}" = "0" ]; then
+   if [ "${fake_time}" = "faketime" ]; then
+      # shellcheck disable=SC2086
+      exec "${fake_time}" "${privacy_time}" ${uwtexec_bin} "$@"
    else
-      exec $uwtexec_bin "$@"
+      # shellcheck disable=SC2086
+      exec ${uwtexec_bin} "$@"
    fi
 fi
 
-if [ "${uwtwrapper["$uwtwrapper_parent"]}" = "0" ]; then
-   if [ "$fake_time" = "faketime" ]; then
-      exec "$fake_time" "$privacy_time" $uwtexec_bin "$@"
+if [ "${uwtwrapper["${uwtwrapper_parent}"]-}" = "0" ]; then
+   if [ "${fake_time}" = "faketime" ]; then
+      # shellcheck disable=SC2086
+      exec "${fake_time}" "${privacy_time}" ${uwtexec_bin} "$@"
    else
-      exec $uwtexec_bin "$@"
+      # shellcheck disable=SC2086
+      exec ${uwtexec_bin} "$@"
    fi
 fi
 
-if [ "$fake_time" = "faketime" ]; then
-   exec "$fake_time" "$privacy_time" $torsocks_bin $uwtexec_bin "$@"
+if [ "${fake_time}" = "faketime" ]; then
+   ## torsocks_bin will be empty if UWT_DEV_PASSTHROUGH is set.
+   # shellcheck disable=SC2086
+   exec "${fake_time}" "${privacy_time}" ${torsocks_bin} ${uwtexec_bin} "$@"
 else
-   exec $torsocks_bin $uwtexec_bin "$@"
+   # shellcheck disable=SC2086
+   exec ${torsocks_bin} ${uwtexec_bin} "$@"
 fi

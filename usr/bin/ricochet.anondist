@@ -13,6 +13,16 @@
 ## on the TOR_CONTROL_HOST and TOR_CONTROL_PORT environment variables being
 ## set. Otherwise it would try to start its own Tor instance.
 ## https://forums.whonix.org/t/test-if-ricochet-im-instructions-are-functional/18959
+
+## style-ok: allow-exec -- transparent wrapper.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+
 TOR_CONTROL_HOST="127.0.0.1"
 TOR_CONTROL_PORT="9151"
 export TOR_CONTROL_HOST

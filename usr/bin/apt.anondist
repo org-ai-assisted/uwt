@@ -9,6 +9,15 @@
 #### description
 ## uwt wrapped application
 
+## style-ok: allow-exec -- transparent wrapper.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+
 export uwtwrapper_parent="${BASH_SOURCE[0]}"
 exec /usr/libexec/uwt/uwtwrapper "$@"
 
