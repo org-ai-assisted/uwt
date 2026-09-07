@@ -13,7 +13,7 @@
 #### meta end
 
 ## style-ok: allow-exec -- this script exists ONLY to re-exec the wrapped
-## program with argv[0] preserved; replacing the process is the whole point.
+## program with argv[0] preserved.
 
 set -o errexit
 set -o nounset
@@ -22,13 +22,15 @@ set -o errtrace
 shopt -s inherit_errexit
 shopt -s shift_verbose
 
-## uwtwrapper exports all three. The verbose flag is optional and defaults to
-## empty. The zeroarg and parent values are required: validate them fail-closed
-## so a missing export aborts with a clear message instead of exec'ing a bogus
-## '.anondist-orig' path with an empty argv[0].
 uwtwrapper_verbose="${uwtwrapper_verbose:-}"
-: "${uwtwrapper_zeroarg:?uwtwrapper_zeroarg is required}"
-: "${uwtwrapper_parent:?uwtwrapper_parent is required}"
+if [ -z "${uwtwrapper_zeroarg:-}" ]; then
+  printf '%s\n' 'uwtwrapper_zeroarg is required'
+  exit 1
+fi
+if [ -z "${uwtwrapper_parent:-}" ]; then
+  printf '%s\n' 'uwtwrapper_parent is required'
+  exit 1
+fi
 
 if [ ! "${uwtwrapper_verbose}" = "" ]; then
    if [ "${uwtwrapper_verbose}" -ge 1 ]; then

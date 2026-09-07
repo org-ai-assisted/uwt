@@ -13,16 +13,10 @@ shopt -s shift_verbose
 shopt -s nullglob
 for i in /etc/uwt.d/*.conf /usr/local/etc/uwt.d/*.conf; do
    bash -n "${i}"
-   ## Dynamic path from the glob above; R-081 prescribes SC1090 here.
    # shellcheck disable=SC1090
    source "${i}"
 done
 
-## uwtwrapper_global comes from the sourced uwt.d conf files and
-## UWT_DEV_PASSTHROUGH is a developer override, so neither is guaranteed to
-## exist; 'enabled' is only assigned inside the branches below. Without these
-## defaults nounset aborts at the first test, where the pre-strict script
-## simply reported "disabled".
 uwtwrapper_global="${uwtwrapper_global:-}"
 UWT_DEV_PASSTHROUGH="${UWT_DEV_PASSTHROUGH:-}"
 enabled=false

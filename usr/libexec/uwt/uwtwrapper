@@ -55,9 +55,7 @@
 ##   upstream to the Debian package 'faketime'. This is to avoid a conflict when
 ##   the new file 'timeprivacy' gets installed by 'faketime'.
 
-## style-ok: allow-exec -- the whole purpose of this wrapper is to hand the
-## process over to the wrapped program, so that its exit code, signals and
-## stdio are the real ones the caller sees.
+## style-ok: allow-exec -- transparent wrapper.
 
 set -o errexit
 set -o nounset
@@ -67,31 +65,28 @@ shopt -s inherit_errexit
 shopt -s shift_verbose
 export LC_ALL=C
 
-## Every one of these is supplied by the caller's environment or by an
-## /etc/uwt.d config file, and any of them can legitimately be absent. Give
-## them a defined value here so a bare read cannot abort the wrapper under
-## nounset before the wrapped program ever runs. The '[ -n ... ] ||' defaults
-## further down stay as they are: they also replace an EXPLICITLY EMPTY value,
-## which '[ -v ... ]' does not.
-[ -v uwtwrapper_verbose ] || uwtwrapper_verbose=""
-[ -v uwtwrapper_parent ] || uwtwrapper_parent=""
-[ -v uwtwrapper_zeroarg ] || uwtwrapper_zeroarg=""
-[ -v uwtwrapper_counter ] || uwtwrapper_counter=""
-[ -v uwtwrapper_max ] || uwtwrapper_max=""
-[ -v uwtwrapper_global ] || uwtwrapper_global=""
-[ -v timeprivacy_global ] || timeprivacy_global=""
-[ -v torsocks_bin ] || torsocks_bin=""
-[ -v uwtexec_bin ] || uwtexec_bin=""
-[ -v bindp_dispatch ] || bindp_dispatch=""
-[ -v bindp_so ] || bindp_so=""
-[ -v bindp_interface ] || bindp_interface=""
-[ -v fake_time ] || fake_time=""
-[ -v privacy_time ] || privacy_time=""
-[ -v BIND_ADDR ] || BIND_ADDR=""
-[ -v LD_PRELOAD ] || LD_PRELOAD=""
-[ -v TORSOCKS_LOG_LEVEL ] || TORSOCKS_LOG_LEVEL=""
-[ -v UWT_DEV_PASSTHROUGH ] || UWT_DEV_PASSTHROUGH=""
-[ -v SCRIPTNAME_CLEANED ] || SCRIPTNAME_CLEANED=""
+# shellcheck source=../../../../../kicksecure/helper-scripts/usr/libexec/helper-scripts/strings.bsh
+source /usr/libexec/helper-scripts/strings.bsh
+
+default_if_empty uwtwrapper_verbose ""
+default_if_empty uwtwrapper_parent ""
+default_if_empty uwtwrapper_zeroarg ""
+default_if_empty uwtwrapper_counter ""
+default_if_empty uwtwrapper_max ""
+default_if_empty uwtwrapper_global ""
+default_if_empty timeprivacy_global ""
+default_if_empty torsocks_bin "torsocks"
+default_if_empty uwtexec_bin "/usr/libexec/uwt/uwtexec"
+default_if_empty bindp_dispatch ""
+default_if_empty bindp_so ""
+default_if_empty bindp_interface ""
+default_if_empty fake_time ""
+default_if_empty privacy_time ""
+default_if_empty BIND_ADDR ""
+default_if_empty LD_PRELOAD ""
+default_if_empty TORSOCKS_LOG_LEVEL "1"
+default_if_empty UWT_DEV_PASSTHROUGH ""
+default_if_empty SCRIPTNAME_CLEANED ""
 
 if [ ! "${uwtwrapper_verbose}" = "" ]; then
    if [ "${uwtwrapper_verbose}" -ge 1 ]; then
@@ -106,9 +101,6 @@ source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/strings.bsh
 # shellcheck source=../../../../../kicksecure/helper-scripts/usr/libexec/helper-scripts/has.sh
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
 
-## Set before the ERR trap is installed: the handler reads it, so an error
-## raised in between would otherwise report an unset variable instead of the
-## bug it was meant to describe.
 SCRIPTNAME="$(basename -- "${BASH_SOURCE[0]}")"
 
 error_handler() {
@@ -129,9 +121,7 @@ preparation() {
    declare -A -g uwtwrapper
    declare -A -g bindp_use
 
-   ## Keep for backwards compatibility with legacy config files, which may
-   ## still assign to it. Nothing in this script reads it, and declaring it is
-   ## the point: without it such a config file would fail under nounset.
+   ## Keep for backwards compatibility with legacy config files.
    # shellcheck disable=SC2034
    declare -A -g uwtport
 }
@@ -142,7 +132,6 @@ source_config_folder() {
    shopt -s nullglob
    for uwt_config_file in /etc/uwt.d/*.conf /usr/local/etc/uwt.d/*.conf; do
       bash -n "${uwt_config_file}"
-      ## Dynamic path from the glob above; R-081 prescribes SC1090 here.
       # shellcheck disable=SC1090
       source "${uwt_config_file}"
    done
@@ -200,8 +189,6 @@ parse_cmd() {
    ## https://mywiki.wooledge.org/BashFAQ/035
 
    while true; do
-      ## Called with no arguments at all is a normal way to reach this
-      ## parser, so the first positional may not exist.
       case "${1-}" in
          -h|'-?'|--help)
             show_help
@@ -239,11 +226,7 @@ variables() {
    ## Disable torsocks warning spam such as:
    ## [May 20 11:45:27] WARNING torsocks[2645]: [syscall] Unsupported syscall number 224. Denying the call (in tsocks_syscall() at syscall.c:165)
    ## https://forums.whonix.org/t/disable-torsocks-warning-spam/19084
-   [ -n "${TORSOCKS_LOG_LEVEL}" ] || TORSOCKS_LOG_LEVEL=1
    export TORSOCKS_LOG_LEVEL
-
-   [ -n "${torsocks_bin}" ] || torsocks_bin=torsocks
-   [ -n "${uwtexec_bin}" ] || uwtexec_bin=/usr/libexec/uwt/uwtexec
 
    if [ "${UWT_DEV_PASSTHROUGH}" = "1" ]; then
       torsocks_bin=""
@@ -304,8 +287,7 @@ variables() {
    [ -n "${timeprivacy_global}" ] || timeprivacy_global="0"
    [ -n "${uwtwrapper_global}" ] || uwtwrapper_global="1"
 
-   ## An absent key is the normal case here, so these reads have to tolerate
-   ## one rather than abort under nounset.
+   ## An absent key is the normal case here.
    [ -n "${bindp_use["/usr/bin/onionshare"]-}" ] || bindp_use["/usr/bin/onionshare"]="true"
    [ -n "${bindp_use["/usr/bin/onionshare-gui"]-}" ] || bindp_use["/usr/bin/onionshare-gui"]="true"
    [ -n "${bindp_use["/usr/bin/ricochet"]-}" ] || bindp_use["/usr/bin/ricochet"]="true"
@@ -395,8 +377,7 @@ if [ "${bindp_dispatch}" = "true" ]; then
    ## The environment variable BIND_ADDR is used by bindp.
    export BIND_ADDR
    export LD_PRELOAD
-   ## Deliberately unquoted: uwtexec_bin may carry a wrapper plus its own
-   ## arguments, and the shell must split it into separate words.
+   ## uwtexec_bin may carry a wrapper plus its own arguments.
    # shellcheck disable=SC2086
    exec ${uwtexec_bin} "$@"
 fi
@@ -415,10 +396,6 @@ else
    fi
 fi
 
-## Unquoted torsocks_bin is load-bearing, not an oversight: UWT_DEV_PASSTHROUGH
-## empties it, and only an unquoted expansion drops the resulting empty word
-## instead of exec-ing a program whose name is the empty string. Same reason
-## for uwtexec_bin as in the bindp branch above.
 if [ "${uwtwrapper_global}" = "0" ]; then
    if [ "${fake_time}" = "faketime" ]; then
       # shellcheck disable=SC2086
@@ -440,6 +417,7 @@ if [ "${uwtwrapper["${uwtwrapper_parent}"]-}" = "0" ]; then
 fi
 
 if [ "${fake_time}" = "faketime" ]; then
+   ## torsocks_bin will be empty if UWT_DEV_PASSTHROUGH is set.
    # shellcheck disable=SC2086
    exec "${fake_time}" "${privacy_time}" ${torsocks_bin} ${uwtexec_bin} "$@"
 else

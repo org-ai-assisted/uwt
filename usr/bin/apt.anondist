@@ -9,9 +9,7 @@
 #### description
 ## uwt wrapped application
 
-## style-ok: allow-exec -- transparent wrapper: the wrapped program must
-## replace this process so its exit code, signals and stdio are the real
-## ones the caller sees.
+## style-ok: allow-exec -- transparent wrapper.
 
 set -o errexit
 set -o nounset

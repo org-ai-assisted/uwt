@@ -13,9 +13,8 @@
 ## on the TOR_CONTROL_HOST and TOR_CONTROL_PORT environment variables being
 ## set. Otherwise it would try to start its own Tor instance.
 ## https://forums.whonix.org/t/test-if-ricochet-im-instructions-are-functional/18959
-## style-ok: allow-exec -- transparent wrapper: the wrapped program must
-## replace this process so its exit code, signals and stdio are the real
-## ones the caller sees.
+
+## style-ok: allow-exec -- transparent wrapper.
 
 set -o errexit
 set -o nounset
