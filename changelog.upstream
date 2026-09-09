@@ -1,3 +1,220 @@
+commit ac04b0fefbb0f95c293b5edd656f8409409296cf
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Tue Sep 8 10:34:21 2026 -0400
+
+    fix: remove duplicate `source`ing of strings.bsh
+
+commit ae454fb181d41b286479545caf6272ec10495d91
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Tue Sep 8 10:34:02 2026 -0400
+
+    fix
+
+commit 12202592df95db4c1b66e8fe39553d7f11e890de
+Merge: 11e104e e28e2b2
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Tue Sep 8 10:33:23 2026 -0400
+
+    Merge remote-tracking branch 'refs/remotes/ArrayBolt3/arraybolt3/trixie'
+
+commit e28e2b225e0dcf7d480e5c8901652b6ddb6c6718
+Author: Aaron Rainbolt <arraybolt3@gmail.com>
+Date:   Sat Sep 5 22:49:25 2026 -0400
+
+    Polish
+
+commit 133f520e89302c1a81cf95f8dafdae3729f417be
+Merge: 11e104e 369799f
+Author: Aaron Rainbolt <arraybolt3@gmail.com>
+Date:   Fri Sep 4 19:33:00 2026 -0400
+
+    Merge branch 'ai' into arraybolt3/trixie
+
+commit 369799fdba4a431287a32afb599185ea7dddf374
+Author: claude (dev272 e8b76afb-795c-4739-8ebd-023de854021e) <noreply@anthropic.com>
+Date:   Fri Aug 21 04:28:24 2026 -0400
+
+    uwt: source helper-scripts via HELPER_SCRIPTS_PATH, drop SC1091 disable
+
+    - usr/libexec/uwt/uwtwrapper: use source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/<f>;
+      drop the dead '# shellcheck disable=SC1091' and the stale sibling note.
+    - .github/dm-consumer.yml: add dist-ai-tests helper-scripts: true so CI checks
+      out helper-scripts as a sibling for shellcheck source resolution.
+    - completed pre-existing whole-file style debt (R-010: export LC_ALL=C).
+
+    Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+commit f75a2cca780cb9b3f47ab4220367db318defa34b
+Author: claude (dev182 e09ec5cf-4ebf-4e1b-88e5-55fbac6ef1d3) <noreply@anthropic.com>
+Date:   Mon Aug 10 13:55:39 2026 -0400
+
+    uwtexec: fail closed on missing required wrapper values
+
+    The zeroarg and parent values are required, but the ':-' empty defaults let a
+    missing export slip through: uwtexec would exec an empty '.anondist-orig' path
+    with an empty argv[0] instead of failing. Validate both with ':?' so a missing
+    export aborts with a clear message; keep the empty default only for the
+    optional verbose flag.
+
+    Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+commit f7fc961fa3eb24daa449dfeb51dd4961bbcf9449
+Author: claude (dev182 e09ec5cf-4ebf-4e1b-88e5-55fbac6ef1d3) <noreply@anthropic.com>
+Date:   Mon Aug 10 13:55:31 2026 -0400
+
+    40_uwt: use the installed uwt_settings_show name
+
+    The motd hook tested and ran /usr/bin/uwt-settings-show, but the installed
+    executable is /usr/bin/uwt_settings_show (underscores). The test -x never
+    matched, so uwt settings were silently never shown in the motd.
+
+    Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+commit 0d790581a36c4efd61f0e1ae5a2f0cc267cbe2de
+Author: claude (dev170 ad818220-b8bb-4205-b850-b65074e52454) <noreply@anthropic.com>
+Date:   Sat Aug 8 12:34:17 2026 -0400
+
+    uwtwrapper: R-010 strict mode
+
+    - strict-mode block, nounset-safe reads for every caller-supplied variable,
+      R-020 braces, R-034 printf, R-051 named ERR trap target, R-070 case arms,
+      R-090 'has' instead of 'command -v'.
+    - the exec lines keep an UNQUOTED torsocks_bin / uwtexec_bin, with SC2086
+      disabled and the reason stated: UWT_DEV_PASSTHROUGH empties torsocks_bin,
+      and only an unquoted expansion drops the empty word instead of exec-ing a
+      program named "".
+    - associative-array reads that may miss (timeprivacy, uwtwrapper, bindp_use)
+      use ${arr[key]-}; an absent key is the normal case, not an error.
+    - uwtport keeps its declaration plus SC2034: legacy config files may assign
+      to it, and without the declaration such a file breaks under nounset.
+
+    Verified behaviour-identical by a differential emit harness
+    (~/strict-pass-tests/uwtw-test/emit.sh), which stubs every external command
+    and compares, per case: stdout+stderr byte for byte, the exit code, and the
+    ordered sequence of commands with full argv. 28 cases, 28 identical.
+
+    Canaried in both directions: injecting an unquoted "$@" makes the argv
+    comparison fail (empty argument dropped, "a b" split, "*" globbed), and
+    dropping the quotes from an error message makes the output comparison fail.
+    shellcheck and the static gate pass both injections.
+
+    Pre-existing bug, deliberately NOT changed here because fixing it changes
+    runtime behaviour: SCRIPTNAME_CLEANED is read in the per-application
+    timeprivacy branch but is set nowhere in the package, so that branch always
+    resolves to ~/.timeprivacy/ regardless of application.
+
+    Gate: pre-push-static --staged exit 0, and ci-repro.sh --worktree whonix/uwt
+    exit 0 (isolated single-repo checkout, the condition CI sees).
+
+    Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+commit 27c6ddfc6c9e16da1fb612b20c4e1f3790d81cb9
+Author: claude (dev163 38f9745c-aed1-4fb4-b6ae-9899f20f8de2) <noreply@anthropic.com>
+Date:   Sat Aug 8 04:56:46 2026 -0400
+
+    CI: enrol in the pre-push static gate
+
+    This repo had no GitHub Actions workflow at all, so nothing verified its PRs on
+    the server side -- the only gate was ci-repro run locally.
+
+    The workflow file is the canonical consumer template, copied verbatim from
+    developer-meta-files/consumer-templates/.github/workflows/. It is managed: once
+    present, dm-packaging-helper-script's pkg_update_consumer_workflows keeps it in
+    sync, so it must not be hand-edited here.
+
+    Enrolment is deliberately a SEPARATE act from propagation: that function uses
+    pkg_update_if_exists, which only updates a workflow that already exists, and
+    pkg_install_dependabot_yml skips any repo with no .github/workflows/ directory.
+    Neither creates the first one. Hence this commit.
+
+    Scope: the repos this session actually changed and that ship shell code -- not
+    every repo lacking CI. Enrolling a repo consumes shared org-wide Actions
+    concurrency (20 jobs, the real limit; public repos are not minute-billed), so it
+    is worth spending where there is signal.
+
+    Verified BEFORE enrolling: 'ci-repro.sh --worktree' passes for this repo, so the
+    gate arrives green rather than turning someone's PR red on arrival.
+
+    NOTE, so it is not a surprise: creating .github/workflows/ makes this repo
+    eligible for the canonical .github/dependabot.yml on the next propagation pass,
+    which pkg_install_dependabot_yml installs into any repo that uses Actions.
+
+commit 021245c3e85f88944e0529c5cb678a19928b8494
+Author: claude (dev163 38f9745c-aed1-4fb4-b6ae-9899f20f8de2) <noreply@anthropic.com>
+Date:   Fri Aug 7 07:17:06 2026 -0400
+
+    fix shellcheck directives for an isolated CI checkout
+
+    The gate passed locally but failed (or would fail) in CI. Cause: CI checks
+    each repo out ALONE, while locally they sit side by side as submodules
+    under derivative-maker/packages. A '# shellcheck source=' climbing out of
+    the repo ('../../../../helper-scripts/...') therefore resolves here and
+    not there, so shellcheck reports SC1091 and the gate fails on a commit
+    that looked clean.
+
+    The source= paths are kept -- they document where the file actually lives
+    -- and each is paired with a 'disable=SC1091' so an absent sibling is
+    tolerated. Same shape already used in security-misc master.
+
+    Follow-on findings from the same isolated run, each with a stated reason
+    rather than a blanket waiver:
+    - SC2154 on systemd_notify: assigned by the sourced systemd-notify.bsh,
+      which shellcheck can no longer follow.
+    - SC2034 on SCRIPTNAME and output_cmd: genuinely unused. suspend-pre's
+      output_cmd toggle is vestigial -- unlike suspend-post the script prints
+      directly -- flagged rather than removed, since wiring it up or dropping
+      it is a maintainer call.
+    - SC1090 on the uwt.d conf glob: a dynamic source, which R-081 prescribes
+      SC1090 for.
+
+    Verified with a new reproducer, ~/strict-pass-tests/ci-repro.sh, which
+    clones the repo on its own and runs the real gate there -- the condition
+    CI actually sees. All six repos: gate exit 0.
+
+    Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+commit 2865ecffcdaf6c4d342a30ce42347db06e54d621
+Author: claude (dev163 38f9745c-aed1-4fb4-b6ae-9899f20f8de2) <noreply@anthropic.com>
+Date:   Wed Aug 5 14:20:30 2026 -0400
+
+    uwt: R-010 strict for the wrappers, uwtexec and uwt_settings_show
+
+    Covers 20 of the package's 21 standalone scripts. uwtwrapper itself is
+    deliberately left for a separate change -- see below.
+
+    The seventeen *.anondist wrappers get the strict preamble and an
+    allow-exec waiver: each exports uwtwrapper_parent and execs
+    /usr/libexec/uwt/uwtwrapper, and the wrapped program must replace the
+    process so its exit code, signals and stdio are the real ones.
+
+    Real nounset traps fixed:
+    - uwtexec reads uwtwrapper_verbose, uwtwrapper_zeroarg and
+      uwtwrapper_parent, all exported by uwtwrapper. A bare read aborts the
+      script, so the wrapped program never runs at all. Verified: removing the
+      defaults again gives 'uwtwrapper_verbose: unbound variable', exit 1.
+    - uwt_settings_show reads uwtwrapper_global (set by the sourced uwt.d conf
+      files), UWT_DEV_PASSTHROUGH (a developer override) and 'enabled' (only
+      assigned inside the branches). With none set the pre-strict script
+      reported "disabled"; under nounset it aborted at the first test.
+
+    Note curl.anondist and dnf-3.anondist were already partially strict but
+    carry only 4 of the 6 R-010 directives, so they would not pass the gate.
+    They are untouched here; converting them is separate work.
+
+    Sandbox differential vs the pre-change scripts, comparing output AND exit
+    code, with a probe installed at the hardcoded /usr/libexec/uwt/uwtwrapper
+    so the wrappers actually reach it: 25 cases, all identical. Argument
+    fidelity checked explicitly -- an argument with a space, a bare glob, and
+    an empty argument all arrive unchanged.
+
+    Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+commit 11e104e544dcec44884eb78b3b5665d730299806
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Wed May 20 22:35:36 2026 +0000
+
+    bumped changelog version
+
 commit 395c3844994c1bad8a3b7bc9a1e7423d82e49657
 Author: Patrick Schleizer <adrelanos@whonix.org>
 Date:   Wed May 20 16:57:38 2026 -0400
