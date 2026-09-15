@@ -1,3 +1,28 @@
+commit 1129e5667ae7b51201f4eff80527a45e7dc22c2a
+Merge: e56f02f d394c7c
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Mon Sep 14 02:42:01 2026 -0400
+
+    Merge remote-tracking branch 'refs/remotes/ArrayBolt3/arraybolt3/trixie'
+
+commit d394c7c9a8e713a4c1dcbb7d2f304f06536aa902
+Author: Aaron Rainbolt <arraybolt3@gmail.com>
+Date:   Sun Sep 13 18:38:42 2026 -0400
+
+    Move privleap configuration to non-conffile location
+
+commit 2e13e76e9e54bb30bf97b7dd06df86af5e895899
+Author: Aaron Rainbolt <arraybolt3@gmail.com>
+Date:   Sun Sep 13 17:26:48 2026 -0400
+
+    has.bsh
+
+commit e56f02fcccc5aed96ff0279fa430e70e82cc9ac3
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Tue Sep 8 15:37:38 2026 +0000
+
+    bumped changelog version
+
 commit ac04b0fefbb0f95c293b5edd656f8409409296cf
 Author: Patrick Schleizer <adrelanos@whonix.org>
 Date:   Tue Sep 8 10:34:21 2026 -0400
