@@ -49,7 +49,23 @@ wait_for_tor_service() {
   fi
 }
 
+## Restore the caller's locale (saved in main before it forces LC_ALL=C for its
+## own deterministic parsing) and exec uwtwrapper, so the wrapped tool runs in the
+## user's locale rather than being forced to C.
+exec_uwtwrapper() {
+  if [ -n "${uwt_caller_lc_all:-}" ]; then
+    export LC_ALL="${uwt_caller_lc_all}"
+  else
+    unset LC_ALL
+  fi
+  exec /usr/libexec/uwt/uwtwrapper "$@"
+}
+
 main() {
+  ## Save the caller's LC_ALL before forcing C, so exec_uwtwrapper can restore it
+  ## for the wrapped tool (dnf must not inherit the script's internal C locale).
+  uwt_caller_lc_all="${LC_ALL:-}"
+
   set -o errexit
   set -o nounset
   set -o pipefail
@@ -80,7 +96,7 @@ main() {
     ## For example, this is useful to prevent 'qubes-whonix-torified-updates-proxy-check.service'
     ## from picking up output by this script such as the following.
     ## > NOTE: Detected loopback address. Stream isolation will be disabled.
-    exec /usr/libexec/uwt/uwtwrapper "${@}"
+    exec_uwtwrapper "${@}"
   fi
 
   ## Prevent 'uwtwrapper' from prepending 'torsocks'.
@@ -112,7 +128,7 @@ main() {
   done
 
   if [ "${disable_stream_isolation}" = 'true' ]; then
-    exec /usr/libexec/uwt/uwtwrapper "${dnf_args[@]}"
+    exec_uwtwrapper "${dnf_args[@]}"
   fi
 
   if [ -n "${curl_binary}" ]; then
@@ -123,7 +139,7 @@ main() {
   fi
 
   if [ "${disable_stream_isolation}" = 'true' ]; then
-    exec /usr/libexec/uwt/uwtwrapper "${dnf_args[@]}"
+    exec_uwtwrapper "${dnf_args[@]}"
   fi
 
   ## https://spec.torproject.org/socks-extensions.html
@@ -136,7 +152,7 @@ main() {
 
   dnf_args=( "${extra_dnf_args[@]}" "${dnf_args[@]}" )
 
-  exec /usr/libexec/uwt/uwtwrapper "${dnf_args[@]}"
+  exec_uwtwrapper "${dnf_args[@]}"
 }
 
 ## Only auto-run when executed, not when sourced (unit tests source it).
