@@ -30,14 +30,11 @@ random_alpha_numeric() {
   printf '%s\n' ""
 }
 
-## Run the tor-wait helper directly. Test seam: overridden to record the call.
+## Split into a function so tests can override it.
 run_tor_wait_direct() {
   /usr/libexec/helper-scripts/try-wait-for-tor-service-running
 }
 
-## Wait for the Tor service before proceeding. As root run the helper directly
-## (no privilege escalation needed); otherwise use leaprun when it can run this
-## action, else fall back to the helper directly.
 wait_for_tor_service() {
   if [ "$(id -u)" = 0 ]; then
     run_tor_wait_direct
@@ -49,9 +46,6 @@ wait_for_tor_service() {
   fi
 }
 
-## Restore the caller's locale (saved in main before it forces LC_ALL=C for its
-## own deterministic parsing) and exec uwtwrapper, so the wrapped tool runs in the
-## user's locale rather than being forced to C.
 exec_uwtwrapper() {
   if [ -n "${uwt_caller_lc_all:-}" ]; then
     export LC_ALL="${uwt_caller_lc_all}"
@@ -62,8 +56,8 @@ exec_uwtwrapper() {
 }
 
 main() {
-  ## Save the caller's LC_ALL before forcing C, so exec_uwtwrapper can restore it
-  ## for the wrapped tool (dnf must not inherit the script's internal C locale).
+  ## Save the caller's LC_ALL before forcing C, so exec_uwtwrapper can
+  ## restore it.
   uwt_caller_lc_all="${LC_ALL:-}"
 
   set -o errexit
@@ -75,7 +69,7 @@ main() {
   export LC_ALL=C
 
   if [ ! "${uwtwrapper_verbose:-}" = "" ]; then
-    if [ "${uwtwrapper_verbose:-}" -ge 1 ]; then
+    if [ "${uwtwrapper_verbose}" -ge 1 ]; then
       set -x
     fi
   fi
@@ -155,7 +149,6 @@ main() {
   exec_uwtwrapper "${dnf_args[@]}"
 }
 
-## Only auto-run when executed, not when sourced (unit tests source it).
 if was_executed "${BASH_SOURCE[0]}"; then
   main "$@"
 fi
