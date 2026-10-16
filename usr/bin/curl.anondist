@@ -21,7 +21,8 @@
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh || true
 if ! declare -F was_executed >/dev/null; then
   printf '%s\n' "$0: ERROR: cannot source check_runtime.bsh!" >&2
-  exit 1
+  ## return (not exit) when sourced so a test harness is not terminated.
+  return 1 2>/dev/null || exit 1
 fi
 
 ## provides random_alpha_numeric
@@ -29,7 +30,8 @@ fi
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/strings.bsh || true
 if ! declare -F random_alpha_numeric >/dev/null; then
   printf '%s\n' "$0: ERROR: cannot source strings.bsh!" >&2
-  exit 1
+  ## return (not exit) when sourced so a test harness is not terminated.
+  return 1 2>/dev/null || exit 1
 fi
 
 ## Split into a function so tests can override it.
