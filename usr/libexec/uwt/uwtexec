@@ -57,9 +57,16 @@ true "$0: uwtwrapper_parent: ${uwtwrapper_parent}"
 ##     accumulates recursion depth and trips uwtwrapper_max, breaking infinite
 ##     loops. Stripping it would reset the depth to 0 at every level and defeat
 ##     the guard.
-##   - uwtwrapper_max / uwtwrapper_global / timeprivacy_global / UWT_DEV_PASSTHROUGH
-##     are NOT touched: uwt only reads them, so they are the caller's own
-##     environment and configuration a nested wrapper must still honor.
+##   - UWT_DEV_PASSTHROUGH MUST be stripped: curl.anondist / dnf-3.anondist
+##     EXPORT it (=1) per invocation to tell uwtwrapper "skip torsocks, I inject
+##     my own --proxy". It is wrapper-written state, NOT caller config. If it
+##     leaked to the wrapped binary and its descendants, a descendant invoking a
+##     uwt-wrapped command would make uwtwrapper set torsocks_bin='' and run it
+##     with NO torsocks -- silently de-torifying nested requests.
+##   - uwtwrapper_max / uwtwrapper_global / timeprivacy_global are NOT touched:
+##     uwt only reads them (never exports), so they are the caller's own
+##     environment and configuration a nested wrapper must still honor, and
+##     source_config_folder re-sources /etc/uwt.d on each invocation regardless.
 ## torsocks' LD_PRELOAD / bindp's BIND_ADDR+LD_PRELOAD are NOT uwt bookkeeping
 ## (the wrapped app needs them) and are left intact.
 zeroarg="${uwtwrapper_zeroarg}"
@@ -71,5 +78,5 @@ if [ -n "${uwt_caller_lc_all:-}" ]; then
 else
    unset -v LC_ALL
 fi
-unset -v uwtwrapper_zeroarg uwtwrapper_parent uwtexec_bin uwt_caller_lc_all
+unset -v uwtwrapper_zeroarg uwtwrapper_parent uwtexec_bin UWT_DEV_PASSTHROUGH uwt_caller_lc_all
 exec -a "${zeroarg}" "${parent}.anondist-orig" "$@"

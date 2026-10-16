@@ -236,7 +236,8 @@ restore_caller_env() {
    else
       unset -v LC_ALL
    fi
-   unset -v uwtwrapper_parent uwtwrapper_zeroarg uwtexec_bin uwt_caller_lc_all
+   unset -v uwtwrapper_parent uwtwrapper_zeroarg uwtexec_bin UWT_DEV_PASSTHROUGH \
+      uwt_caller_lc_all
 }
 
 variables() {
