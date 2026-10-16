@@ -224,18 +224,19 @@ nested_protection() {
    fi
 }
 
-## Strip uwt-internal bookkeeping and restore the caller's locale before an exec
-## that bypasses uwtexec (the symlink-passthrough paths), so the target does not
-## inherit uwt's environment. The main paths get the same treatment in uwtexec.
+## Strip uwt's per-invocation internal plumbing and restore the caller's locale
+## before an exec that bypasses uwtexec (the symlink-passthrough paths), so the
+## target does not inherit it. nested_protection has already run, so
+## uwtwrapper_counter is KEPT: a wrapper reached through the symlink target must
+## still see the accumulated recursion depth (see uwtexec for the full
+## rationale). The main paths get the same treatment in uwtexec.
 restore_caller_env() {
    if [ -n "${uwt_caller_lc_all:-}" ]; then
       export LC_ALL="${uwt_caller_lc_all}"
    else
       unset -v LC_ALL
    fi
-   unset -v uwtwrapper_parent uwtwrapper_zeroarg uwtwrapper_counter \
-      uwtwrapper_verbose uwtwrapper_max uwtwrapper_global timeprivacy_global \
-      uwtexec_bin UWT_DEV_PASSTHROUGH uwt_caller_lc_all
+   unset -v uwtwrapper_parent uwtwrapper_zeroarg uwtexec_bin uwt_caller_lc_all
 }
 
 variables() {
@@ -405,7 +406,7 @@ fi
 ## An application with no entry in the timeprivacy map is the normal case.
 if [ "${timeprivacy["${uwtwrapper_parent}"]-}" = "1" ]; then
    fake_time="faketime"
-   privacy_time="$("time_privacy" -f ~"/.timeprivacy/${SCRIPTNAME_CLEANED}")"
+   privacy_time="$("time_privacy" -f "${HOME}/.timeprivacy/${SCRIPTNAME_CLEANED}")"
 else
    if [ "${timeprivacy_global}" = "1" ]; then
       fake_time="faketime"

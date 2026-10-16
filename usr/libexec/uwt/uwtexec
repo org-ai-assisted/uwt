@@ -47,10 +47,21 @@ true "$0: uwtwrapper_parent: ${uwtwrapper_parent}"
 ## $uwtwrapper_zeroarg and the other arguments set to $@.
 ##
 ## uwtexec is the single chokepoint every exec path routes through, so strip
-## uwt-internal bookkeeping from the environment HERE, so the wrapped
-## application does not inherit it. Capture the two values still needed for the
-## exec into locals first. torsocks' LD_PRELOAD / bindp's BIND_ADDR+LD_PRELOAD
-## are NOT uwt bookkeeping (the wrapped app needs them) and are left intact.
+## uwt's per-invocation internal plumbing from the environment HERE, so the
+## wrapped application does not inherit it. Capture the values still needed for
+## the exec into locals first.
+##   - uwtwrapper_zeroarg MUST be stripped: a nested wrapper only defaults it
+##     when empty, so a stale value would hijack the nested command's argv[0].
+##   - uwtwrapper_counter is deliberately KEPT: nested_protection increments and
+##     exports it so a re-invoked wrapper (reached THROUGH this application)
+##     accumulates recursion depth and trips uwtwrapper_max, breaking infinite
+##     loops. Stripping it would reset the depth to 0 at every level and defeat
+##     the guard.
+##   - uwtwrapper_max / uwtwrapper_global / timeprivacy_global / UWT_DEV_PASSTHROUGH
+##     are NOT touched: uwt only reads them, so they are the caller's own
+##     environment and configuration a nested wrapper must still honor.
+## torsocks' LD_PRELOAD / bindp's BIND_ADDR+LD_PRELOAD are NOT uwt bookkeeping
+## (the wrapped app needs them) and are left intact.
 zeroarg="${uwtwrapper_zeroarg}"
 parent="${uwtwrapper_parent}"
 ## Restore the caller's locale saved by uwtwrapper. Empty means the caller had
@@ -60,7 +71,5 @@ if [ -n "${uwt_caller_lc_all:-}" ]; then
 else
    unset -v LC_ALL
 fi
-unset -v uwtwrapper_zeroarg uwtwrapper_parent uwtwrapper_counter \
-   uwtwrapper_verbose uwtwrapper_max uwtwrapper_global timeprivacy_global \
-   uwtexec_bin UWT_DEV_PASSTHROUGH uwt_caller_lc_all
+unset -v uwtwrapper_zeroarg uwtwrapper_parent uwtexec_bin uwt_caller_lc_all
 exec -a "${zeroarg}" "${parent}.anondist-orig" "$@"
