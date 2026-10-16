@@ -23,12 +23,13 @@ if ! declare -F was_executed >/dev/null; then
   exit 1
 fi
 
-## NOTE: Duplicated in package 'helper-scripts' file 'strings.sh'.
-random_alpha_numeric() {
-  local n="${1:-43}"
-  LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/random | head --bytes="$n" || true
-  printf '%s\n' ""
-}
+## provides random_alpha_numeric
+# shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/strings.bsh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/strings.bsh || true
+if ! declare -F random_alpha_numeric >/dev/null; then
+  printf '%s\n' "$0: ERROR: cannot source strings.bsh!" >&2
+  exit 1
+fi
 
 ## Split into a function so tests can override it.
 run_tor_wait_direct() {

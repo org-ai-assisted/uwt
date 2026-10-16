@@ -23,11 +23,32 @@ set -o errtrace
 shopt -s inherit_errexit
 shopt -s shift_verbose
 
+## Save the caller's LC_ALL before forcing C, so it can be restored before exec.
+uwt_caller_lc_all="${LC_ALL:-}"
+export LC_ALL=C
+
+## provides was_executed
+# shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/check_runtime.bsh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh || true
+if ! declare -F was_executed >/dev/null; then
+  printf '%s\n' "$0: ERROR: cannot source check_runtime.bsh!" >&2
+  exit 1
+fi
+
 TOR_CONTROL_HOST="127.0.0.1"
 TOR_CONTROL_PORT="9151"
 export TOR_CONTROL_HOST
 export TOR_CONTROL_PORT
 
-export uwtwrapper_parent="${BASH_SOURCE[0]}"
-exec /usr/libexec/uwt/uwtwrapper "$@"
+if was_executed "${BASH_SOURCE[0]}"; then
+  export uwtwrapper_parent="${BASH_SOURCE[0]}"
+  ## Restore the caller's LC_ALL so the wrapped application runs under the
+  ## caller's locale, not uwt's internal C.
+  if [ -n "${uwt_caller_lc_all:-}" ]; then
+    export LC_ALL="${uwt_caller_lc_all}"
+  else
+    unset LC_ALL
+  fi
+  exec /usr/libexec/uwt/uwtwrapper "$@"
+fi
 #### meta end
