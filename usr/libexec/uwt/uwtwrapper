@@ -63,6 +63,12 @@ set -o pipefail
 set -o errtrace
 shopt -s inherit_errexit
 shopt -s shift_verbose
+
+## Save the caller's locale before forcing C for uwt's own parsing, so the
+## wrapped application runs under the caller's locale (restored at the uwtexec
+## chokepoint) instead of inheriting C. Exported so it survives the exec chain.
+uwt_caller_lc_all="${LC_ALL:-}"
+export uwt_caller_lc_all
 export LC_ALL=C
 
 # shellcheck source=../../../../../kicksecure/helper-scripts/usr/libexec/helper-scripts/strings.bsh
@@ -218,6 +224,20 @@ nested_protection() {
    fi
 }
 
+## Strip uwt-internal bookkeeping and restore the caller's locale before an exec
+## that bypasses uwtexec (the symlink-passthrough paths), so the target does not
+## inherit uwt's environment. The main paths get the same treatment in uwtexec.
+restore_caller_env() {
+   if [ -n "${uwt_caller_lc_all:-}" ]; then
+      export LC_ALL="${uwt_caller_lc_all}"
+   else
+      unset -v LC_ALL
+   fi
+   unset -v uwtwrapper_parent uwtwrapper_zeroarg uwtwrapper_counter \
+      uwtwrapper_verbose uwtwrapper_max uwtwrapper_global timeprivacy_global \
+      uwtexec_bin UWT_DEV_PASSTHROUGH uwt_caller_lc_all
+}
+
 variables() {
    local readlink_result bindp_use_item
 
@@ -261,6 +281,7 @@ variables() {
          else
             true "${0}: No, uwtwrapper_parent ${uwtwrapper_parent} does not have a uwt wrapper script."
             true "${0}: Therefore, execute the target of the symlink for uwtwrapper_parent ${uwtwrapper_parent}."
+            restore_caller_env
             exec "${readlink_result}" "$@"
          fi
       fi
@@ -276,6 +297,7 @@ variables() {
          ## readlink_result example:
          ## gpg
          true "${0}: Therefore, execute readlink_result: ${readlink_result}."
+         restore_caller_env
          exec "${readlink_result}" "$@"
       fi
    else
