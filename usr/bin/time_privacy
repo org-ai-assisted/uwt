@@ -19,13 +19,6 @@ shopt -s inherit_errexit
 shopt -s shift_verbose
 export LC_ALL=C
 
-## SECONDS is a special bash variable that counts elapsed wall-clock time since
-## its last assignment. This script uses SECONDS as a plain counter, so without
-## this the stored value drifts by however long the script runs, corrupting the
-## offset (e.g. 0 + increment 1 yields 2 after a 1s run). Unsetting it strips
-## the special property permanently, even across later assignment.
-unset -v SECONDS
-
 source "${HELPER_SCRIPTS_PATH:-}/usr/libexec/helper-scripts/strings.bsh"
 
 SCRIPTNAME="$(basename "$BASH_SOURCE")"
@@ -182,12 +175,12 @@ read_date_file() {
       #printf '%s\n' "2013" > "$YEARS_FILE"
    #fi
 
-   SECONDS="$(stcat "$SECONDS_FILE")"
+   seconds_count="$(stcat "$SECONDS_FILE")"
    MINUTES="$(stcat "$MINUTES_FILE")"
    HOURS="$(stcat "$HOURS_FILE")"
 
-   if [ -z "$SECONDS" ]; then
-      SECONDS="0"
+   if [ -z "$seconds_count" ]; then
+      seconds_count="0"
    fi
 
    if [ -z "$MINUTES" ]; then
@@ -198,9 +191,9 @@ read_date_file() {
       HOURS="0"
    fi
 
-   local nodigits="$(printf '%s\n' "$SECONDS" | sed 's/[[:digit:]]//g')"
+   local nodigits="$(printf '%s\n' "$seconds_count" | sed 's/[[:digit:]]//g')"
    if [ ! -z "$nodigits" ]; then
-      SECONDS="0"
+      seconds_count="0"
    fi
 
    local nodigits="$(printf '%s\n' "$MINUTES" | sed 's/[[:digit:]]//g')"
@@ -217,9 +210,9 @@ read_date_file() {
    ## value ("08", "012") bypasses is_whole_number (only the nodigits guard above
    ## runs) and bash arithmetic would read it as octal -- "08"/"09" abort the
    ## script ("value too great for base"), "012" silently becomes 10.
-   SECONDS="$(( 10#$SECONDS + $_increment ))"
-   if [ "$SECONDS" -ge "60" ]; then
-      SECONDS="0"
+   seconds_count="$(( 10#$seconds_count + $_increment ))"
+   if [ "$seconds_count" -ge "60" ]; then
+      seconds_count="0"
 
       MINUTES="$(( 10#$MINUTES + 1 ))"
       if [ "$MINUTES" -ge "60" ]; then
@@ -236,7 +229,7 @@ read_date_file() {
 
    fi
 
-   printf '%s\n' "$SECONDS" > "$SECONDS_FILE"
+   printf '%s\n' "$seconds_count" > "$SECONDS_FILE"
 
    #printf '%s\n' "$HOURS $MINUTES $SECONDS"
 }
@@ -253,7 +246,7 @@ need_new_date() {
    #printf '%s\n' "faketime '$_year-$_month-$_day $HOURS:$MINUTES:$SECONDS' /bin/date"
    #faketime "$_year-$_month-$_day $HOURS:$MINUTES:$SECONDS" /bin/date
 
-   printf '%s\n' "$_year-$_month-$_day $HOURS:$MINUTES:$SECONDS"
+   printf '%s\n' "$_year-$_month-$_day $HOURS:$MINUTES:$seconds_count"
 }
 
 need_new_date
