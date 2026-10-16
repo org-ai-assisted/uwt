@@ -15,6 +15,9 @@ set -o errexit
 set -o nounset
 set -o errtrace
 set -o pipefail
+shopt -s inherit_errexit
+shopt -s shift_verbose
+export LC_ALL=C
 
 ## SECONDS is a special bash variable that counts elapsed wall-clock time since
 ## its last assignment. This script uses SECONDS as a plain counter, so without
