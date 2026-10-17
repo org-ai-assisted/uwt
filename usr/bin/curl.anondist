@@ -124,8 +124,16 @@ main() {
       printf '%s\n' "WARNING: Detected '--proxy-user' or '-U' argument. Stream isolation will be disabled." 1>&2
       disable_stream_isolation='true'
     fi
-    if [[ "${curl_arg}" =~ ^[^-].*127\.0\.0\.1 ]] \
-      || [[ "${curl_arg}" =~ ^[^-].*\[::1\] ]]; then
+    ## Match any loopback target so stream isolation is skipped for it (not a
+    ## leak: a loopback request never leaves the host, so there is no Tor circuit
+    ## to isolate). Covers the whole 127.0.0.0/8 range, IPv6 [::1], and the
+    ## 'localhost' hostname. The leading ^[^-] skips option FLAGS (so only a
+    ## non-option token, i.e. a URL/host operand, is matched). A hostname like
+    ## 'localhost.example.com' over-matches and merely loses isolation (still
+    ## torified) -- acceptable for this heuristic, which cannot fully parse curl.
+    if [[ "${curl_arg}" =~ ^[^-].*127\.[0-9]+\.[0-9]+\.[0-9]+ ]] \
+      || [[ "${curl_arg}" =~ ^[^-].*\[::1\] ]] \
+      || [[ "${curl_arg}" =~ ^[^-].*localhost ]]; then
       printf '%s\n' "NOTE: Detected loopback address. Stream isolation will be disabled." 1>&2
       disable_stream_isolation='true'
     fi
