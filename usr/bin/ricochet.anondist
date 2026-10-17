@@ -8,6 +8,7 @@
 #### category networking
 #### description
 ## uwt wrapped application
+#### meta end
 
 ## ricochet does not have unix domain socket file support, therefore it depends
 ## on the TOR_CONTROL_HOST and TOR_CONTROL_PORT environment variables being
@@ -16,18 +17,46 @@
 
 ## style-ok: allow-exec -- transparent wrapper.
 
-set -o errexit
-set -o nounset
-set -o pipefail
-set -o errtrace
-shopt -s inherit_errexit
-shopt -s shift_verbose
+## provides was_executed
+# shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/check_runtime.bsh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh || true
+if ! declare -F was_executed >/dev/null; then
+  printf '%s\n' "$0: ERROR: cannot source check_runtime.bsh!" >&2
+  ## return (not exit) when sourced so a test harness is not terminated.
+  return 1 2>/dev/null || exit 1
+fi
 
-TOR_CONTROL_HOST="127.0.0.1"
-TOR_CONTROL_PORT="9151"
-export TOR_CONTROL_HOST
-export TOR_CONTROL_PORT
+## Split into a function so tests can override it.
+exec_uwtwrapper() {
+  ## Restore the caller's LC_ALL (saved in main before forcing C) so the wrapped
+  ## application runs under the caller's locale, not uwt's internal C.
+  if [ -n "${uwt_caller_lc_all:-}" ]; then
+    export LC_ALL="${uwt_caller_lc_all}"
+  else
+    unset LC_ALL
+  fi
+  exec /usr/libexec/uwt/uwtwrapper "$@"
+}
 
-export uwtwrapper_parent="${BASH_SOURCE[0]}"
-exec /usr/libexec/uwt/uwtwrapper "$@"
-#### meta end
+main() {
+  ## Save the caller's LC_ALL before forcing C, so exec_uwtwrapper can restore it.
+  uwt_caller_lc_all="${LC_ALL:-}"
+
+  set -o errexit
+  set -o nounset
+  set -o pipefail
+  set -o errtrace
+  shopt -s inherit_errexit
+  shopt -s shift_verbose
+  export LC_ALL=C
+
+  export TOR_CONTROL_HOST="127.0.0.1"
+  export TOR_CONTROL_PORT="9151"
+
+  export uwtwrapper_parent="${BASH_SOURCE[0]}"
+  exec_uwtwrapper "$@"
+}
+
+if was_executed "${BASH_SOURCE[0]}"; then
+  main "$@"
+fi

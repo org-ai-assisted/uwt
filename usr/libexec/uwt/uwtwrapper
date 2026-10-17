@@ -57,49 +57,13 @@
 
 ## style-ok: allow-exec -- transparent wrapper.
 
-set -o errexit
-set -o nounset
-set -o pipefail
-set -o errtrace
-shopt -s inherit_errexit
-shopt -s shift_verbose
-export LC_ALL=C
-
-# shellcheck source=../../../../../kicksecure/helper-scripts/usr/libexec/helper-scripts/strings.bsh
-source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/strings.bsh
-
-default_if_empty uwtwrapper_verbose ""
-default_if_empty uwtwrapper_parent ""
-default_if_empty uwtwrapper_zeroarg ""
-default_if_empty uwtwrapper_counter ""
-default_if_empty uwtwrapper_max ""
-default_if_empty uwtwrapper_global ""
-default_if_empty timeprivacy_global ""
-default_if_empty torsocks_bin "torsocks"
-default_if_empty uwtexec_bin "/usr/libexec/uwt/uwtexec"
-default_if_empty bindp_dispatch ""
-default_if_empty bindp_so ""
-default_if_empty bindp_interface ""
-default_if_empty fake_time ""
-default_if_empty privacy_time ""
-default_if_empty BIND_ADDR ""
-default_if_empty LD_PRELOAD ""
-default_if_empty TORSOCKS_LOG_LEVEL "1"
-default_if_empty UWT_DEV_PASSTHROUGH ""
-default_if_empty SCRIPTNAME_CLEANED ""
-
-if [ ! "${uwtwrapper_verbose}" = "" ]; then
-   if [ "${uwtwrapper_verbose}" -ge 1 ]; then
-      set -x
-   fi
+## provides was_executed
+# shellcheck source=../../../../../kicksecure/helper-scripts/usr/libexec/helper-scripts/check_runtime.bsh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh || true
+if ! declare -F was_executed >/dev/null; then
+   printf '%s\n' "$0: ERROR: cannot source check_runtime.bsh!" >&2
+   exit 1
 fi
-
-true "${0}: START"
-
-# shellcheck source=../../../../../kicksecure/helper-scripts/usr/libexec/helper-scripts/has.bsh
-source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.bsh
-
-SCRIPTNAME="$(basename -- "${BASH_SOURCE[0]}")"
 
 error_handler() {
    printf '%s\n' "
@@ -111,8 +75,6 @@ error_handler() {
 "
    exit 1
 }
-
-trap error_handler ERR
 
 preparation() {
    declare -A -g timeprivacy
@@ -218,6 +180,22 @@ nested_protection() {
    fi
 }
 
+## Strip uwt's per-invocation internal plumbing and restore the caller's locale
+## before an exec that bypasses uwtexec (the symlink-passthrough paths), so the
+## target does not inherit it. nested_protection has already run, so
+## uwtwrapper_counter is KEPT: a wrapper reached through the symlink target must
+## still see the accumulated recursion depth (see uwtexec for the full
+## rationale). The main paths get the same treatment in uwtexec.
+restore_caller_env() {
+   if [ -n "${uwt_caller_lc_all:-}" ]; then
+      export LC_ALL="${uwt_caller_lc_all}"
+   else
+      unset -v LC_ALL
+   fi
+   unset -v uwtwrapper_parent uwtwrapper_zeroarg uwtexec_bin UWT_DEV_PASSTHROUGH \
+      uwt_caller_lc_all
+}
+
 variables() {
    local readlink_result bindp_use_item
 
@@ -261,6 +239,7 @@ variables() {
          else
             true "${0}: No, uwtwrapper_parent ${uwtwrapper_parent} does not have a uwt wrapper script."
             true "${0}: Therefore, execute the target of the symlink for uwtwrapper_parent ${uwtwrapper_parent}."
+            restore_caller_env
             exec "${readlink_result}" "$@"
          fi
       fi
@@ -276,6 +255,7 @@ variables() {
          ## readlink_result example:
          ## gpg
          true "${0}: Therefore, execute readlink_result: ${readlink_result}."
+         restore_caller_env
          exec "${readlink_result}" "$@"
       fi
    else
@@ -355,70 +335,124 @@ https://www.kicksecure.com/wiki/Command-not-found"
    fi
 }
 
-preparation "$@"
-source_config_folder "$@"
-parse_cmd "$@"
-nested_protection
-variables "$@"
-alternatives_support "$@"
-sanity_tests_general "$@"
-
-if [ "${bindp_dispatch}" = "true" ]; then
-   ## https://github.com/Kicksecure/bindp
-   ## https://forums.whonix.org/t/find-way-to-have-tor-ephermal-hidden-service-using-applications-in-whonix-workstation-bind-on-all-interfaces/18846
-   [ -n "${bindp_so}" ] || bindp_so="/usr/lib/libindp.so"
-   [ -n "${bindp_interface}" ] || bindp_interface="eth0"
-   ## TODO: IPv6
-   [ -n "${BIND_ADDR}" ] || BIND_ADDR="$(/sbin/ifconfig "${bindp_interface}" | grep -oP 'inet \K\S+')" || true
-   [ -n "${BIND_ADDR}" ] || BIND_ADDR="127.0.0.1"
-   LD_PRELOAD+=" ${bindp_so}"
-   ## The environment variable BIND_ADDR is used by bindp.
-   export BIND_ADDR
-   export LD_PRELOAD
-   ## uwtexec_bin may carry a wrapper plus its own arguments.
-   # shellcheck disable=SC2086
-   exec ${uwtexec_bin} "$@"
-fi
-
-## An application with no entry in the timeprivacy map is the normal case.
-if [ "${timeprivacy["${uwtwrapper_parent}"]-}" = "1" ]; then
-   fake_time="faketime"
-   privacy_time="$("time_privacy" -f ~"/.timeprivacy/${SCRIPTNAME_CLEANED}")"
-else
-   if [ "${timeprivacy_global}" = "1" ]; then
+## Decide time-privacy (faketime) and stream-isolation (torsocks) use from the
+## global/per-application contract. The contract is IDENTICAL for both features;
+## only the DEFAULT of the *_global variable differs (uwtwrapper_global defaults
+## "1" = on, timeprivacy_global defaults "0" = off, both set in variables()):
+##   global="0"  -> feature OFF for every application; the per-app map is ignored
+##                  (global disable-all wins, no per-app entry can re-enable).
+##   global!="0" -> feature ON; a per-app entry of "0" disables that ONE
+##                  application (a per-app entry of "1" is redundant with on).
+## Sets fake_time/privacy_time (faketime, empty when time privacy is off) and
+## empties torsocks_bin when stream isolation is off. torsocks_bin is only ever
+## EMPTIED here (never set), so a prior UWT_DEV_PASSTHROUGH emptying in
+## variables() is preserved; an unquoted empty torsocks_bin drops out of the
+## exec line below.
+compute_dispatch() {
+   fake_time=""
+   privacy_time=""
+   if [ "${timeprivacy_global}" != "0" ] \
+      && [ "${timeprivacy["${uwtwrapper_parent}"]-}" != "0" ]; then
       fake_time="faketime"
       privacy_time="$("time_privacy")"
-   else
-      fake_time=""
-      privacy_time=""
    fi
-fi
 
-if [ "${uwtwrapper_global}" = "0" ]; then
-   if [ "${fake_time}" = "faketime" ]; then
-      # shellcheck disable=SC2086
-      exec "${fake_time}" "${privacy_time}" ${uwtexec_bin} "$@"
-   else
+   if [ "${uwtwrapper_global}" = "0" ] \
+      || [ "${uwtwrapper["${uwtwrapper_parent}"]-}" = "0" ]; then
+      torsocks_bin=""
+   fi
+}
+
+main() {
+   set -o errexit
+   set -o nounset
+   set -o pipefail
+   set -o errtrace
+   shopt -s inherit_errexit
+   shopt -s shift_verbose
+
+   ## Save the caller's locale before forcing C for uwt's own parsing, so the
+   ## wrapped application runs under the caller's locale (restored at the uwtexec
+   ## chokepoint) instead of inheriting C. Exported so it survives the exec chain.
+   uwt_caller_lc_all="${LC_ALL:-}"
+   export uwt_caller_lc_all
+   export LC_ALL=C
+
+   # shellcheck source=../../../../../kicksecure/helper-scripts/usr/libexec/helper-scripts/strings.bsh
+   source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/strings.bsh
+
+   default_if_empty uwtwrapper_verbose ""
+   default_if_empty uwtwrapper_parent ""
+   default_if_empty uwtwrapper_zeroarg ""
+   default_if_empty uwtwrapper_counter ""
+   default_if_empty uwtwrapper_max ""
+   default_if_empty uwtwrapper_global ""
+   default_if_empty timeprivacy_global ""
+   default_if_empty torsocks_bin "torsocks"
+   default_if_empty uwtexec_bin "/usr/libexec/uwt/uwtexec"
+   default_if_empty bindp_dispatch ""
+   default_if_empty bindp_so ""
+   default_if_empty bindp_interface ""
+   default_if_empty fake_time ""
+   default_if_empty privacy_time ""
+   default_if_empty BIND_ADDR ""
+   default_if_empty LD_PRELOAD ""
+   default_if_empty TORSOCKS_LOG_LEVEL "1"
+   default_if_empty UWT_DEV_PASSTHROUGH ""
+
+   if [ ! "${uwtwrapper_verbose}" = "" ]; then
+      if [ "${uwtwrapper_verbose}" -ge 1 ]; then
+         set -x
+      fi
+   fi
+
+   true "${0}: START"
+
+   # shellcheck source=../../../../../kicksecure/helper-scripts/usr/libexec/helper-scripts/has.bsh
+   source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.bsh
+
+   SCRIPTNAME="$(basename -- "${BASH_SOURCE[0]}")"
+
+   trap error_handler ERR
+
+   preparation "$@"
+   source_config_folder "$@"
+   parse_cmd "$@"
+   nested_protection
+   variables "$@"
+   alternatives_support "$@"
+   sanity_tests_general "$@"
+
+   if [ "${bindp_dispatch}" = "true" ]; then
+      ## https://github.com/Kicksecure/bindp
+      ## https://forums.whonix.org/t/find-way-to-have-tor-ephermal-hidden-service-using-applications-in-whonix-workstation-bind-on-all-interfaces/18846
+      [ -n "${bindp_so}" ] || bindp_so="/usr/lib/libindp.so"
+      [ -n "${bindp_interface}" ] || bindp_interface="eth0"
+      ## TODO: IPv6
+      [ -n "${BIND_ADDR}" ] || BIND_ADDR="$(/sbin/ifconfig "${bindp_interface}" | grep -oP 'inet \K\S+')" || true
+      [ -n "${BIND_ADDR}" ] || BIND_ADDR="127.0.0.1"
+      LD_PRELOAD+=" ${bindp_so}"
+      ## The environment variable BIND_ADDR is used by bindp.
+      export BIND_ADDR
+      export LD_PRELOAD
+      ## uwtexec_bin may carry a wrapper plus its own arguments.
       # shellcheck disable=SC2086
       exec ${uwtexec_bin} "$@"
    fi
-fi
 
-if [ "${uwtwrapper["${uwtwrapper_parent}"]-}" = "0" ]; then
+   compute_dispatch
+
    if [ "${fake_time}" = "faketime" ]; then
+      ## torsocks_bin is empty when stream isolation is off (global/per-app
+      ## disable or UWT_DEV_PASSTHROUGH), so it drops out of the unquoted expansion.
       # shellcheck disable=SC2086
-      exec "${fake_time}" "${privacy_time}" ${uwtexec_bin} "$@"
+      exec "${fake_time}" "${privacy_time}" ${torsocks_bin} ${uwtexec_bin} "$@"
    else
       # shellcheck disable=SC2086
-      exec ${uwtexec_bin} "$@"
+      exec ${torsocks_bin} ${uwtexec_bin} "$@"
    fi
-fi
+}
 
-if [ "${fake_time}" = "faketime" ]; then
-   ## torsocks_bin will be empty if UWT_DEV_PASSTHROUGH is set.
-   # shellcheck disable=SC2086
-   exec "${fake_time}" "${privacy_time}" ${torsocks_bin} ${uwtexec_bin} "$@"
-else
-   # shellcheck disable=SC2086
-   exec ${torsocks_bin} ${uwtexec_bin} "$@"
+if was_executed "${BASH_SOURCE[0]}"; then
+   main "$@"
 fi

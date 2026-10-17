@@ -15,17 +15,35 @@ set -o errexit
 set -o nounset
 set -o errtrace
 set -o pipefail
+shopt -s inherit_errexit
+shopt -s shift_verbose
+export LC_ALL=C
 
-source /usr/libexec/helper-scripts/strings.bsh
+source "${HELPER_SCRIPTS_PATH:-}/usr/libexec/helper-scripts/strings.bsh"
 
 SCRIPTNAME="$(basename "$BASH_SOURCE")"
 
 usage() {
    printf '%s\n' "$SCRIPTNAME
 
-Usage: $SCRIPTNAME [-h help] [-d day] [-m month] [-y year] [-i increment in seconds (0-60)] [-r random increment in seconds (0-60)] [-f history folder]
-Example: $SCRIPTNAME -d 30 -m 12 -y 2013 -i 10 -f /tmp/$SCRIPTNAMEtest
-         sudo $SCRIPTNAME -d 30 -m 12 -y 2013 -r -f /tmp/$SCRIPTNAMEtest"
+Usage: $SCRIPTNAME [-h help] [-d day] [-m month] [-y year] [-i increment in seconds (0-60)] [-r random increment in seconds (1-60)] [-f history folder]
+Example: $SCRIPTNAME -d 30 -m 12 -y 2013 -i 10 -f /tmp/${SCRIPTNAME}test
+         sudo $SCRIPTNAME -d 30 -m 12 -y 2013 -r -f /tmp/${SCRIPTNAME}test"
+}
+
+## Year, month and day are zero-padded by 'date' ('+%d'/'+%m' -> '05', '09';
+## '+%Y' zero-pads years 0-999, e.g. '0500', '0068') and passed verbatim to
+## faketime, never used in arithmetic, so a leading zero is valid -- the hardened
+## is_whole_number (which rejects leading zeros) must NOT gate them, else the
+## default date breaks on days/months 01-09 and on years 0-999.
+## OUT OF SCOPE (do not re-tighten): faketime century-windows a 2-digit year
+## (01 -> 2001, 68 -> 2068) -- that is GNU date's documented behavior, applies
+## to any 2-digit year this validator cannot distinguish by intent, and the
+## default ('date +%Y') is always 4-digit, so there is nothing here to fix.
+is_digit_string() {
+   case "${1}" in
+      ''|*[!0-9]*) return 1 ;;
+   esac
 }
 
 _randomincrement="none"
@@ -95,8 +113,16 @@ elif [ "$_increment" = "none" ]; then
    if ! is_whole_number "$_randomincrement"; then
       printf '%s\n' "randomincrement must be a positive number."
       exit 1
+   elif [ "${#_randomincrement}" -gt 2 ] || [ "$_randomincrement" -gt 60 ] \
+      || [ "$_randomincrement" -lt 1 ]; then
+      ## Length guard first: a value too large for bash arithmetic (> INT64_MAX)
+      ## would WRAP to a negative in a bare '-gt 60' and slip through. The -lt 1
+      ## guard rejects 0, which is_whole_number accepts but 'random-between 1 0'
+      ## would crash on.
+      printf '%s\n' "randomincrement must be between 1 and 60."
+      exit 1
    else
-      random_number="$(/usr/libexec/helper-scripts/random-between 1 "$_randomincrement")"
+      random_number="$("${HELPER_SCRIPTS_PATH:-}/usr/libexec/helper-scripts/random-between" 1 "$_randomincrement")"
       _increment="$random_number"
    fi
 else
@@ -105,7 +131,7 @@ else
 fi
 
 if [ -z "${TIMEDIR-}" ]; then
-   TIMEDIR=~/.timeprivacy
+   TIMEDIR="${HOME}/.timeprivacy"
 fi
 
 if ! is_whole_number "$_increment"; then
@@ -113,17 +139,25 @@ if ! is_whole_number "$_increment"; then
    exit 1
 fi
 
-if ! is_whole_number "$_year"; then
+## Enforce the documented 0-60 range. Length guard first: a value too large for
+## bash arithmetic (> INT64_MAX) WRAPS to a negative, so a bare '-gt 60' would
+## pass it through and the carry below would store a negative/garbage time.
+if [ "${#_increment}" -gt 2 ] || [ "$_increment" -gt 60 ]; then
+   printf '%s\n' "increment must be between 0 and 60."
+   exit 1
+fi
+
+if ! is_digit_string "$_year"; then
    printf '%s\n' "year is not a digit."
    exit 1
 fi
 
-if ! is_whole_number "$_month"; then
+if ! is_digit_string "$_month"; then
    printf '%s\n' "month is not a digit."
    exit 1
 fi
 
-if ! is_whole_number "$_day"; then
+if ! is_digit_string "$_day"; then
    printf '%s\n' "day is not a digit."
    exit 1
 fi
@@ -172,59 +206,39 @@ read_date_file() {
       #printf '%s\n' "2013" > "$YEARS_FILE"
    #fi
 
-   SECONDS="$(stcat "$SECONDS_FILE")"
-   MINUTES="$(stcat "$MINUTES_FILE")"
-   HOURS="$(stcat "$HOURS_FILE")"
+   ## read_integer_file validates each counter is a whole number within its
+   ## clock range (int64-safe, so no bash octal/overflow pitfalls). A missing,
+   ## empty, non-numeric, leading-zero, out-of-range or oversized value fails
+   ## the read and is treated as 0 -- this script only ever WRITES in-range
+   ## plain integers, so that path means a corrupt/externally-edited file.
+   ## 2>/dev/null: a corrupt counter self-heals to 0 silently (matching the prior
+   ## behavior); the diagnostic would otherwise repeat every run for a bad
+   ## minutes/hours file that no carry rewrites.
+   seconds_count="$(read_integer_file "$SECONDS_FILE" 0 59 2>/dev/null)" || seconds_count="0"
+   minutes="$(read_integer_file "$MINUTES_FILE" 0 59 2>/dev/null)" || minutes="0"
+   hours="$(read_integer_file "$HOURS_FILE" 0 23 2>/dev/null)" || hours="0"
 
-   if [ -z "$SECONDS" ]; then
-      SECONDS="0"
-   fi
-
-   if [ -z "$MINUTES" ]; then
-      MINUTES="0"
-   fi
-
-   if [ -z "$HOURS" ]; then
-      HOURS="0"
-   fi
-
-   local nodigits="$(printf '%s\n' "$SECONDS" | sed 's/[[:digit:]]//g')"
-   if [ ! -z "$nodigits" ]; then
-      SECONDS="0"
-   fi
-
-   local nodigits="$(printf '%s\n' "$MINUTES" | sed 's/[[:digit:]]//g')"
-   if [ ! -z "$nodigits" ]; then
-      MINUTES="0"
-   fi
-
-   local nodigits="$(printf '%s\n' "$HOURS" | sed 's/[[:digit:]]//g')"
-   if [ ! -z "$nodigits" ]; then
-      HOURS="0"
-   fi
-
-   SECONDS="$(( $SECONDS + $_increment ))"
-   if [ "$SECONDS" -ge "60" ]; then
-      SECONDS="0"
-
-      MINUTES="$(( $MINUTES + 1 ))"
-      if [ "$MINUTES" -ge "60" ]; then
-         MINUTES="0"
-
-         HOURS="$(( $HOURS + 1 ))"
-         if [ "$HOURS" -ge "24" ]; then
-            HOURS="0"
-         fi
-         printf '%s\n' "$HOURS" > "$HOURS_FILE"
-
+   ## The increment is bounded to 0-60 (validated above) and the counters are
+   ## 0-59, so the sum carries at most one minute. Preserve the seconds
+   ## remainder (total % 60) -- the old reset-to-0 dropped it and capped
+   ## accumulation at ~1 minute per call. Counters are clean ints (no leading
+   ## zeros), so no base-10 forcing is needed.
+   local total_seconds
+   total_seconds="$(( seconds_count + _increment ))"
+   seconds_count="$(( total_seconds % 60 ))"
+   if [ "$total_seconds" -ge 60 ]; then
+      minutes="$(( minutes + 1 ))"
+      if [ "$minutes" -ge 60 ]; then
+         minutes=0
+         hours="$(( ( hours + 1 ) % 24 ))"
+         printf '%s\n' "$hours" > "$HOURS_FILE"
       fi
-      printf '%s\n' "$MINUTES" > "$MINUTES_FILE"
-
+      printf '%s\n' "$minutes" > "$MINUTES_FILE"
    fi
 
-   printf '%s\n' "$SECONDS" > "$SECONDS_FILE"
+   printf '%s\n' "$seconds_count" > "$SECONDS_FILE"
 
-   #printf '%s\n' "$HOURS $MINUTES $SECONDS"
+   #printf '%s\n' "$hours $minutes $seconds_count"
 }
 
 need_new_date() {
@@ -236,10 +250,10 @@ need_new_date() {
    read_date_file
 
    ## Testing
-   #printf '%s\n' "faketime '$_year-$_month-$_day $HOURS:$MINUTES:$SECONDS' /bin/date"
-   #faketime "$_year-$_month-$_day $HOURS:$MINUTES:$SECONDS" /bin/date
+   #printf '%s\n' "faketime '$_year-$_month-$_day $hours:$minutes:$seconds_count' /bin/date"
+   #faketime "$_year-$_month-$_day $hours:$minutes:$seconds_count" /bin/date
 
-   printf '%s\n' "$_year-$_month-$_day $HOURS:$MINUTES:$SECONDS"
+   printf '%s\n' "$_year-$_month-$_day $hours:$minutes:$seconds_count"
 }
 
 need_new_date

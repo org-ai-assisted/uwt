@@ -21,6 +21,7 @@ set -o pipefail
 set -o errtrace
 shopt -s inherit_errexit
 shopt -s shift_verbose
+export LC_ALL=C
 
 uwtwrapper_verbose="${uwtwrapper_verbose:-}"
 if [ -z "${uwtwrapper_zeroarg:-}" ]; then
@@ -44,4 +45,38 @@ true "$0: uwtwrapper_parent: ${uwtwrapper_parent}"
 
 ## Execute $uwtwrapper_parent.anondist-orig with the zeroth argument set to
 ## $uwtwrapper_zeroarg and the other arguments set to $@.
-exec -a "${uwtwrapper_zeroarg}" "${uwtwrapper_parent}.anondist-orig" "$@"
+##
+## uwtexec is the single chokepoint every exec path routes through, so strip
+## uwt's per-invocation internal plumbing from the environment HERE, so the
+## wrapped application does not inherit it. Capture the values still needed for
+## the exec into locals first.
+##   - uwtwrapper_zeroarg MUST be stripped: a nested wrapper only defaults it
+##     when empty, so a stale value would hijack the nested command's argv[0].
+##   - uwtwrapper_counter is deliberately KEPT: nested_protection increments and
+##     exports it so a re-invoked wrapper (reached THROUGH this application)
+##     accumulates recursion depth and trips uwtwrapper_max, breaking infinite
+##     loops. Stripping it would reset the depth to 0 at every level and defeat
+##     the guard.
+##   - UWT_DEV_PASSTHROUGH MUST be stripped: curl.anondist / dnf-3.anondist
+##     EXPORT it (=1) per invocation to tell uwtwrapper "skip torsocks, I inject
+##     my own --proxy". It is wrapper-written state, NOT caller config. If it
+##     leaked to the wrapped binary and its descendants, a descendant invoking a
+##     uwt-wrapped command would make uwtwrapper set torsocks_bin='' and run it
+##     with NO torsocks -- silently de-torifying nested requests.
+##   - uwtwrapper_max / uwtwrapper_global / timeprivacy_global are NOT touched:
+##     uwt only reads them (never exports), so they are the caller's own
+##     environment and configuration a nested wrapper must still honor, and
+##     source_config_folder re-sources /etc/uwt.d on each invocation regardless.
+## torsocks' LD_PRELOAD / bindp's BIND_ADDR+LD_PRELOAD are NOT uwt bookkeeping
+## (the wrapped app needs them) and are left intact.
+zeroarg="${uwtwrapper_zeroarg}"
+parent="${uwtwrapper_parent}"
+## Restore the caller's locale saved by uwtwrapper. Empty means the caller had
+## no LC_ALL, so leave it unset rather than forcing C onto the application.
+if [ -n "${uwt_caller_lc_all:-}" ]; then
+   export LC_ALL="${uwt_caller_lc_all}"
+else
+   unset -v LC_ALL
+fi
+unset -v uwtwrapper_zeroarg uwtwrapper_parent uwtexec_bin UWT_DEV_PASSTHROUGH uwt_caller_lc_all
+exec -a "${zeroarg}" "${parent}.anondist-orig" "$@"
