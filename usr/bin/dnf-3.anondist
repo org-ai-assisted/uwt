@@ -129,7 +129,9 @@ main() {
   fi
 
   if [ -n "${curl_binary}" ]; then
-    if ! "${curl_binary}" "http://127.0.0.1:9050/" --output /dev/null 2>/dev/null; then
+    ## --disable (first arg) so the probe ignores the user's ~/.curlrc; 'timeout'
+    ## hard-caps a wedged probe (stronger than curl's own --max-time).
+    if ! timeout --kill-after=10 10 "${curl_binary}" --disable "http://127.0.0.1:9050/" --output /dev/null 2>/dev/null; then
       #printf '%s\n' "WARNING: Tor proxy doesn't seem to be functional. Stream isolation will be disabled." 1>&2
       disable_stream_isolation='true'
     fi
