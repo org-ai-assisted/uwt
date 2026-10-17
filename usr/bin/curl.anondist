@@ -89,6 +89,11 @@ main() {
 
   curl_args=( "$@" )
   curl_binary="$(command -v curl.anondist-orig)" || curl_binary=""
+  ## When true, curl runs WITHOUT the injected SOCKS proxy. On Whonix this is not
+  ## a leak: the Gateway transparently torifies all Workstation traffic via its
+  ## TransPort/DnsPort regardless. It only means the stream shares a Tor circuit
+  ## (identity-correlation risk) instead of getting its own isolated one.
+  ## https://www.whonix.org/wiki/Stream_Isolation
   disable_stream_isolation='false'
   found_ipv6_arg='false'
 
