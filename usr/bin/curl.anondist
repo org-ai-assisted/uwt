@@ -73,7 +73,15 @@ arg_targets_loopback() {
   case "${arg}" in
     -*) return 1 ;;
   esac
-  authority="${arg#*://}"
+  ## Strip a scheme ONLY when a real 'scheme://' starts the argument -- the scheme
+  ## char class stops at the first '/', '?' or '#', so a '://' buried in the
+  ## path/query of a SCHEME-LESS URL (e.g. 'example.com/?next=http://localhost')
+  ## is not mistaken for the authority delimiter.
+  if [[ "${arg}" =~ ^[a-zA-Z][a-zA-Z0-9+.-]*:// ]]; then
+    authority="${arg#*://}"
+  else
+    authority="${arg}"
+  fi
   authority="${authority%%[/?#]*}"
   authority="${authority##*@}"
   case "${authority}" in
