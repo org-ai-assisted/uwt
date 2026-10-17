@@ -206,53 +206,31 @@ read_date_file() {
       #printf '%s\n' "2013" > "$YEARS_FILE"
    #fi
 
-   seconds_count="$(stcat "$SECONDS_FILE")"
-   MINUTES="$(stcat "$MINUTES_FILE")"
-   HOURS="$(stcat "$HOURS_FILE")"
+   ## read_integer_file validates each counter is a whole number within its
+   ## clock range (int64-safe, so no bash octal/overflow pitfalls). A missing,
+   ## empty, non-numeric, leading-zero, out-of-range or oversized value fails
+   ## the read and is treated as 0 -- this script only ever WRITES in-range
+   ## plain integers, so that path means a corrupt/externally-edited file.
+   ## 2>/dev/null: a corrupt counter self-heals to 0 silently (matching the prior
+   ## behavior); the diagnostic would otherwise repeat every run for a bad
+   ## minutes/hours file that no carry rewrites.
+   seconds_count="$(read_integer_file "$SECONDS_FILE" 0 59 2>/dev/null)" || seconds_count="0"
+   MINUTES="$(read_integer_file "$MINUTES_FILE" 0 59 2>/dev/null)" || MINUTES="0"
+   HOURS="$(read_integer_file "$HOURS_FILE" 0 23 2>/dev/null)" || HOURS="0"
 
-   if [ -z "$seconds_count" ]; then
-      seconds_count="0"
-   fi
-
-   if [ -z "$MINUTES" ]; then
-      MINUTES="0"
-   fi
-
-   if [ -z "$HOURS" ]; then
-      HOURS="0"
-   fi
-
-   local nodigits="$(printf '%s\n' "$seconds_count" | sed 's/[[:digit:]]//g')"
-   if [ ! -z "$nodigits" ]; then
-      seconds_count="0"
-   fi
-
-   local nodigits="$(printf '%s\n' "$MINUTES" | sed 's/[[:digit:]]//g')"
-   if [ ! -z "$nodigits" ]; then
-      MINUTES="0"
-   fi
-
-   local nodigits="$(printf '%s\n' "$HOURS" | sed 's/[[:digit:]]//g')"
-   if [ ! -z "$nodigits" ]; then
-      HOURS="0"
-   fi
-
-   ## Force base 10: the counter files hold a decimal count, but a leading-zero
-   ## value ("08", "012") bypasses is_whole_number (only the nodigits guard above
-   ## runs) and bash arithmetic would read it as octal -- "08"/"09" abort the
-   ## script ("value too great for base"), "012" silently becomes 10.
-   ## The increment is bounded to 0-60 (validated above) and the prior seconds
-   ## are 0-59, so the sum carries at most one minute. Preserve the seconds
+   ## The increment is bounded to 0-60 (validated above) and the counters are
+   ## 0-59, so the sum carries at most one minute. Preserve the seconds
    ## remainder (total % 60) -- the old reset-to-0 dropped it and capped
-   ## accumulation at ~1 minute per call.
+   ## accumulation at ~1 minute per call. Counters are clean ints (no leading
+   ## zeros), so no base-10 forcing is needed.
    local total_seconds
-   total_seconds="$(( 10#$seconds_count + $_increment ))"
+   total_seconds="$(( seconds_count + _increment ))"
    seconds_count="$(( total_seconds % 60 ))"
    if [ "$total_seconds" -ge 60 ]; then
-      MINUTES="$(( 10#$MINUTES + 1 ))"
+      MINUTES="$(( MINUTES + 1 ))"
       if [ "$MINUTES" -ge 60 ]; then
          MINUTES=0
-         HOURS="$(( ( 10#$HOURS + 1 ) % 24 ))"
+         HOURS="$(( ( HOURS + 1 ) % 24 ))"
          printf '%s\n' "$HOURS" > "$HOURS_FILE"
       fi
       printf '%s\n' "$MINUTES" > "$MINUTES_FILE"
