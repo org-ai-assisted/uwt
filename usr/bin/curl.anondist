@@ -124,16 +124,6 @@ main() {
       printf '%s\n' "WARNING: Detected '--proxy-user' or '-U' argument. Stream isolation will be disabled." 1>&2
       disable_stream_isolation='true'
     fi
-    ## A caller-supplied '--noproxy' means the caller is managing proxy bypass; it
-    ## also OVERRIDES the wrapper's injected '--noproxy' (curl is last-wins, and
-    ## the injected args are prepended), so injecting the SOCKS proxy would route
-    ## the caller's bypassed hosts through Tor anyway. Disable isolation and pass
-    ## argv verbatim (same policy as '--proxy'/'--proxy-user'). curl has no short
-    ## form for '--noproxy'.
-    if [ "${curl_arg}" = '--noproxy' ]; then
-      printf '%s\n' "WARNING: Detected '--noproxy' argument. Stream isolation will be disabled." 1>&2
-      disable_stream_isolation='true'
-    fi
     if [ "${curl_arg}" = '--ipv6' ] \
       || [ "${curl_arg}" = '-6' ]; then
       found_ipv6_arg='true'
@@ -186,11 +176,23 @@ main() {
   ## and by domain suffix (LOCALHOST, foo.localhost, localhost.), and decides per
   ## URL (a mixed 'http://a/ http://localhost/' isolates only the remote one).
   ## '--noproxy' applies to a SOCKS proxy, not only HTTP; CIDR needs curl >= 7.86.0
-  ## (trixie ships 8.x). Residual loopback spellings curl's '--noproxy' does NOT
-  ## match -- IPv4-mapped IPv6 ('[::ffff:127.0.0.1]') and /etc/hosts aliases
-  ## ('ip6-localhost') -- are handed to the SOCKS proxy, which Tor refuses for
-  ## loopback, so they fail fast and visibly (never a leak; the Gateway torifies
-  ## regardless). https://www.whonix.org/wiki/Stream_Isolation
+  ## (trixie ships 8.x).
+  ## Known scope of the '--noproxy' approach (all fail-closed, none a Tor leak):
+  ##   - A CALLER's own '--noproxy' REPLACES this list (curl is last-wins and the
+  ##     injected args are prepended, so the caller's is later), so a loopback
+  ##     target they did not list goes to the SOCKS proxy, which Tor refuses for
+  ##     loopback -> fails fast. The injected '--proxy' still applies, so isolation
+  ##     is NOT lost for the other hosts (hence '--noproxy' is NOT in the
+  ##     caller-manages-proxy passthrough set above, unlike '--proxy'/'-U').
+  ##   - The bypass also applies to '-L' REDIRECT targets, so a remote server can
+  ##     redirect curl onto a Workstation-LOCAL service (an SSRF gadget). Outside
+  ##     this wrapper's scope: it torifies, it does not sandbox local services, and
+  ##     loopback is non-torified BY DESIGN.
+  ##   - Loopback spellings curl's '--noproxy' does NOT match -- IPv4-mapped IPv6
+  ##     ('[::ffff:127.0.0.1]'), mixed hex/short ('0X7f.1') and /etc/hosts aliases
+  ##     ('ip6-localhost') -- are handed to the SOCKS proxy, which Tor refuses for
+  ##     loopback, so they fail fast and visibly.
+  ## https://www.whonix.org/wiki/Stream_Isolation
   extra_curl_args=(
     '--proxy' "socks5h://${curl_proxy_addr}/"
     '--proxy-user' "<torS0X>0:curl-wrapper_${random_socks_password}"
