@@ -215,8 +215,8 @@ read_date_file() {
    ## behavior); the diagnostic would otherwise repeat every run for a bad
    ## minutes/hours file that no carry rewrites.
    seconds_count="$(read_integer_file "$SECONDS_FILE" 0 59 2>/dev/null)" || seconds_count="0"
-   MINUTES="$(read_integer_file "$MINUTES_FILE" 0 59 2>/dev/null)" || MINUTES="0"
-   HOURS="$(read_integer_file "$HOURS_FILE" 0 23 2>/dev/null)" || HOURS="0"
+   minutes="$(read_integer_file "$MINUTES_FILE" 0 59 2>/dev/null)" || minutes="0"
+   hours="$(read_integer_file "$HOURS_FILE" 0 23 2>/dev/null)" || hours="0"
 
    ## The increment is bounded to 0-60 (validated above) and the counters are
    ## 0-59, so the sum carries at most one minute. Preserve the seconds
@@ -227,18 +227,18 @@ read_date_file() {
    total_seconds="$(( seconds_count + _increment ))"
    seconds_count="$(( total_seconds % 60 ))"
    if [ "$total_seconds" -ge 60 ]; then
-      MINUTES="$(( MINUTES + 1 ))"
-      if [ "$MINUTES" -ge 60 ]; then
-         MINUTES=0
-         HOURS="$(( ( HOURS + 1 ) % 24 ))"
-         printf '%s\n' "$HOURS" > "$HOURS_FILE"
+      minutes="$(( minutes + 1 ))"
+      if [ "$minutes" -ge 60 ]; then
+         minutes=0
+         hours="$(( ( hours + 1 ) % 24 ))"
+         printf '%s\n' "$hours" > "$HOURS_FILE"
       fi
-      printf '%s\n' "$MINUTES" > "$MINUTES_FILE"
+      printf '%s\n' "$minutes" > "$MINUTES_FILE"
    fi
 
    printf '%s\n' "$seconds_count" > "$SECONDS_FILE"
 
-   #printf '%s\n' "$HOURS $MINUTES $SECONDS"
+   #printf '%s\n' "$hours $minutes $seconds_count"
 }
 
 need_new_date() {
@@ -250,10 +250,10 @@ need_new_date() {
    read_date_file
 
    ## Testing
-   #printf '%s\n' "faketime '$_year-$_month-$_day $HOURS:$MINUTES:$SECONDS' /bin/date"
-   #faketime "$_year-$_month-$_day $HOURS:$MINUTES:$SECONDS" /bin/date
+   #printf '%s\n' "faketime '$_year-$_month-$_day $hours:$minutes:$seconds_count' /bin/date"
+   #faketime "$_year-$_month-$_day $hours:$minutes:$seconds_count" /bin/date
 
-   printf '%s\n' "$_year-$_month-$_day $HOURS:$MINUTES:$seconds_count"
+   printf '%s\n' "$_year-$_month-$_day $hours:$minutes:$seconds_count"
 }
 
 need_new_date
