@@ -97,6 +97,15 @@ main() {
   disable_stream_isolation='false'
   found_ipv6_arg='false'
 
+  ## A loopback DESTINATION (not merely a token containing a loopback literal).
+  ## The literal must sit at the host position: token start, or right after a
+  ## 'scheme://', and be followed by a port/path/query delimiter or end of token.
+  ## This anchoring keeps a remote URL whose PATH or QUERY happens to contain
+  ## '127.x'/'localhost' (or a 'localhost.example.com' host) from matching, and a
+  ## leading '-' (an option flag) never starts with a scheme letter or a loopback
+  ## literal, so flags are skipped without a separate guard.
+  loopback_host_re='^([a-zA-Z][a-zA-Z0-9+.-]*://)?(\[::1\]|127\.[0-9]+\.[0-9]+\.[0-9]+|localhost)([:/?#]|$)'
+
   for curl_arg in "${curl_args[@]}"; do
     ## Unfortunately curl's argument parser makes it impossible to determine
     ## what is an option, what is an argument to an option, and what is a URL,
@@ -124,16 +133,20 @@ main() {
       printf '%s\n' "WARNING: Detected '--proxy-user' or '-U' argument. Stream isolation will be disabled." 1>&2
       disable_stream_isolation='true'
     fi
-    ## Match any loopback target so stream isolation is skipped for it (not a
-    ## leak: a loopback request never leaves the host, so there is no Tor circuit
-    ## to isolate). Covers the whole 127.0.0.0/8 range, IPv6 [::1], and the
-    ## 'localhost' hostname. The leading ^[^-] skips option FLAGS (so only a
-    ## non-option token, i.e. a URL/host operand, is matched). A hostname like
-    ## 'localhost.example.com' over-matches and merely loses isolation (still
-    ## torified) -- acceptable for this heuristic, which cannot fully parse curl.
-    if [[ "${curl_arg}" =~ ^[^-].*127\.[0-9]+\.[0-9]+\.[0-9]+ ]] \
-      || [[ "${curl_arg}" =~ ^[^-].*\[::1\] ]] \
-      || [[ "${curl_arg}" =~ ^[^-].*localhost ]]; then
+    ## Skip stream isolation for a loopback destination (not a leak: a loopback
+    ## request never leaves the host, so there is no Tor circuit to isolate).
+    ## Covers 127.0.0.0/8, IPv6 [::1], and 'localhost' in the common forms (bare
+    ## host, host:port, host/path, scheme://host...). RESIDUALS this heuristic
+    ## does NOT catch (same class the comment above documents: argv cannot be
+    ## fully parsed without replicating curl's option table): a loopback literal
+    ## passed as an OPTION ARGUMENT (e.g. '-d localhost'); alternate address
+    ## spellings curl normalizes to loopback ('127.1', '0x7f000001', '[::0001]');
+    ## an upper-case 'LOCALHOST'; userinfo ('http://user@localhost/'). A miss only
+    ## means the loopback request is handed to the SOCKS proxy (fails fast); a
+    ## false match only shares a circuit (still torified). One decision covers the
+    ## whole invocation, so a loopback URL alongside a remote one (multi-URL
+    ## '--next') disables isolation for both -- a known limitation.
+    if [[ "${curl_arg}" =~ ${loopback_host_re} ]]; then
       printf '%s\n' "NOTE: Detected loopback address. Stream isolation will be disabled." 1>&2
       disable_stream_isolation='true'
     fi
