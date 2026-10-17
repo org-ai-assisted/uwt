@@ -31,12 +31,15 @@ Example: $SCRIPTNAME -d 30 -m 12 -y 2013 -i 10 -f /tmp/${SCRIPTNAME}test
          sudo $SCRIPTNAME -d 30 -m 12 -y 2013 -r -f /tmp/${SCRIPTNAME}test"
 }
 
-## Month/day are zero-padded ('date +%m'/'+%d' yield '05', '09') and passed
-## verbatim to faketime, never used in arithmetic, so a leading zero is valid --
+## Year, month and day are zero-padded by 'date' ('+%d'/'+%m' -> '05', '09';
+## '+%Y' zero-pads years 0-999, e.g. '0500', '0068') and passed verbatim to
+## faketime, never used in arithmetic, so a leading zero is valid -- the hardened
 ## is_whole_number (which rejects leading zeros) must NOT gate them, else the
-## default date breaks on days/months 01-09. The YEAR keeps is_whole_number: it
-## is always 4-digit ('date +%Y'), needs no leading zero, and a 2-digit value
-## like '01' would be windowed by faketime to 2001 rather than year 1.
+## default date breaks on days/months 01-09 and on years 0-999.
+## OUT OF SCOPE (do not re-tighten): faketime century-windows a 2-digit year
+## (01 -> 2001, 68 -> 2068) -- that is GNU date's documented behavior, applies
+## to any 2-digit year this validator cannot distinguish by intent, and the
+## default ('date +%Y') is always 4-digit, so there is nothing here to fix.
 is_digit_string() {
    case "${1}" in
       ''|*[!0-9]*) return 1 ;;
@@ -144,7 +147,7 @@ if [ "${#_increment}" -gt 2 ] || [ "$_increment" -gt 60 ]; then
    exit 1
 fi
 
-if ! is_whole_number "$_year"; then
+if ! is_digit_string "$_year"; then
    printf '%s\n' "year is not a digit."
    exit 1
 fi
