@@ -133,19 +133,23 @@ main() {
       printf '%s\n' "WARNING: Detected '--proxy-user' or '-U' argument. Stream isolation will be disabled." 1>&2
       disable_stream_isolation='true'
     fi
-    ## Skip stream isolation for a loopback destination (not a leak: a loopback
-    ## request never leaves the host, so there is no Tor circuit to isolate).
-    ## Covers 127.0.0.0/8, IPv6 [::1], and 'localhost' in the common forms (bare
-    ## host, host:port, host/path, scheme://host...). RESIDUALS this heuristic
-    ## does NOT catch (same class the comment above documents: argv cannot be
-    ## fully parsed without replicating curl's option table): a loopback literal
-    ## passed as an OPTION ARGUMENT (e.g. '-d localhost'); alternate address
-    ## spellings curl normalizes to loopback ('127.1', '0x7f000001', '[::0001]');
-    ## an upper-case 'LOCALHOST'; userinfo ('http://user@localhost/'). A miss only
-    ## means the loopback request is handed to the SOCKS proxy (fails fast); a
-    ## false match only shares a circuit (still torified). One decision covers the
-    ## whole invocation, so a loopback URL alongside a remote one (multi-URL
-    ## '--next') disables isolation for both -- a known limitation.
+    ## Skip stream isolation for a loopback DESTINATION -- not a leak: a loopback
+    ## request never leaves the host, so there is no Tor circuit to isolate.
+    ## Matches 127.0.0.0/8, IPv6 [::1] and 'localhost' at the host position. argv
+    ## cannot be fully parsed without replicating curl's option table, so some
+    ## edge cases stay misclassified; both directions are low-impact by design:
+    ##   FALSE NEGATIVE (loopback not matched -> handed to the SOCKS proxy, which
+    ##   Tor refuses for loopback, so it fails fast and visibly -- never a leak):
+    ##     127.1 / 0x7f000001 / 0177.0.0.1   (alternate IPv4 spellings)
+    ##     [::0001] / [::ffff:7f00:1]        (alternate IPv6 spellings)
+    ##     LOCALHOST                         (match is case-sensitive)
+    ##     http://user@localhost/            (userinfo before the host)
+    ##   FALSE POSITIVE (remote treated as loopback -> still works, just shares a
+    ##   circuit instead of an isolated one; still torified, no leak):
+    ##     curl -d localhost https://remote/ (loopback literal as an OPTION
+    ##                                        ARGUMENT, indistinguishable from an operand)
+    ##     curl http://a/ http://localhost/  (multi-URL/--next: one decision covers
+    ##                                        the whole invocation, so both lose isolation)
     if [[ "${curl_arg}" =~ ${loopback_host_re} ]]; then
       printf '%s\n' "NOTE: Detected loopback address. Stream isolation will be disabled." 1>&2
       disable_stream_isolation='true'
