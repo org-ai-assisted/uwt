@@ -46,55 +46,6 @@ exec_uwtwrapper() {
   exec /usr/libexec/uwt/uwtwrapper "$@"
 }
 
-## Return 0 if the argument targets a loopback host, else 1. The host is
-## EXTRACTED the way curl's URL authority grammar works, rather than pattern-
-## matched against the raw token: the authority ends at the first '/', '?' or
-## '#'; userinfo is split off at the LAST '@'; an IPv6 host is '['-bracketed.
-## Classifying the CLEAN host (not the raw argument) is what keeps a loopback
-## literal in a path/query/fragment, or as the userinfo of a remote host, from
-## matching, while a real loopback behind userinfo ('http://u:p@127.0.0.1/')
-## still matches. A leading '-' is an option flag, never a destination.
-## RESIDUALS (host extraction is exact-match, argv is not fully parsed):
-##   FALSE NEGATIVE (loopback not matched -> handed to the SOCKS proxy, which Tor
-##   refuses for loopback, so it fails fast and visibly -- never a leak):
-##     127.1 / 0x7f000001 / 0177.0.0.1   (alternate IPv4 spellings)
-##     [::0001] / [::ffff:127.0.0.1]     (alternate / IPv4-mapped IPv6)
-##     LOCALHOST                         (match is case-sensitive)
-##     foo.localhost / localhost.        (RFC 6761 sub-names / trailing dot)
-##     ip6-localhost                     (an /etc/hosts alias, not a literal)
-##     curl 'http://{localhost,a}/'      (curl URL glob -- needs glob expansion)
-##   FALSE POSITIVE (remote treated as loopback -> still works, just shares a
-##   circuit instead of an isolated one; still torified, no leak):
-##     curl -d localhost https://remote/ (loopback as a separate OPTION-ARGUMENT
-##                                        token, indistinguishable from an operand)
-##     curl http://a/ http://localhost/  (multi-URL/--next: one decision covers
-##                                        the whole invocation, so both lose isolation)
-arg_targets_loopback() {
-  local arg="$1" authority host
-  case "${arg}" in
-    -*) return 1 ;;
-  esac
-  ## Strip a scheme ONLY when a real 'scheme://' starts the argument -- the scheme
-  ## char class stops at the first '/', '?' or '#', so a '://' buried in the
-  ## path/query of a SCHEME-LESS URL (e.g. 'example.com/?next=http://localhost')
-  ## is not mistaken for the authority delimiter.
-  if [[ "${arg}" =~ ^[a-zA-Z][a-zA-Z0-9+.-]*:// ]]; then
-    authority="${arg#*://}"
-  else
-    authority="${arg}"
-  fi
-  authority="${authority%%[/?#]*}"
-  authority="${authority##*@}"
-  case "${authority}" in
-    \[*\]*) host="${authority#\[}"; host="${host%%\]*}" ;;
-    *) host="${authority%%:*}" ;;
-  esac
-  case "${host}" in
-    localhost|::1) return 0 ;;
-  esac
-  [[ "${host}" =~ ^127\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
-}
-
 main() {
   ## Save the caller's LC_ALL before forcing C, so exec_uwtwrapper can restore it.
   uwt_caller_lc_all="${LC_ALL:-}"
@@ -127,8 +78,8 @@ main() {
   if [ "$UWT_DEV_PASSTHROUGH" = 1 ]; then
     ## UWT_DEV_PASSTHROUGH=1 is already set. Obey it.
     ## For example, this is useful to prevent 'qubes-whonix-torified-updates-proxy-check.service'
-    ## from picking up output by this script such as the following.
-    ## > NOTE: Detected loopback address. Stream isolation will be disabled.
+    ## from picking up diagnostic output by this script such as the following.
+    ## > WARNING: Tor proxy doesn't seem to be functional. Stream isolation will be disabled.
     exec_uwtwrapper "${@}"
   fi
 
@@ -173,11 +124,14 @@ main() {
       printf '%s\n' "WARNING: Detected '--proxy-user' or '-U' argument. Stream isolation will be disabled." 1>&2
       disable_stream_isolation='true'
     fi
-    ## Skip stream isolation for a loopback DESTINATION -- not a leak: a loopback
-    ## request never leaves the host, so there is no Tor circuit to isolate (the
-    ## residual misclassifications are enumerated at arg_targets_loopback).
-    if arg_targets_loopback "${curl_arg}"; then
-      printf '%s\n' "NOTE: Detected loopback address. Stream isolation will be disabled." 1>&2
+    ## A caller-supplied '--noproxy' means the caller is managing proxy bypass; it
+    ## also OVERRIDES the wrapper's injected '--noproxy' (curl is last-wins, and
+    ## the injected args are prepended), so injecting the SOCKS proxy would route
+    ## the caller's bypassed hosts through Tor anyway. Disable isolation and pass
+    ## argv verbatim (same policy as '--proxy'/'--proxy-user'). curl has no short
+    ## form for '--noproxy'.
+    if [ "${curl_arg}" = '--noproxy' ]; then
+      printf '%s\n' "WARNING: Detected '--noproxy' argument. Stream isolation will be disabled." 1>&2
       disable_stream_isolation='true'
     fi
     if [ "${curl_arg}" = '--ipv6' ] \
@@ -225,9 +179,22 @@ main() {
 
   ## https://spec.torproject.org/socks-extensions.html
   random_socks_password="$(random_alpha_numeric 43)"
+  ## '--noproxy' makes curl connect DIRECTLY (bypassing the injected SOCKS proxy)
+  ## for a loopback DESTINATION, classified PER-URL by curl's own URL parser --
+  ## replacing hand-rolled host extraction. curl normalizes the host (so 127.1,
+  ## 0x7f000001 and 0177.0.0.1 all match 127.0.0.0/8), matches case-insensitively
+  ## and by domain suffix (LOCALHOST, foo.localhost, localhost.), and decides per
+  ## URL (a mixed 'http://a/ http://localhost/' isolates only the remote one).
+  ## '--noproxy' applies to a SOCKS proxy, not only HTTP; CIDR needs curl >= 7.86.0
+  ## (trixie ships 8.x). Residual loopback spellings curl's '--noproxy' does NOT
+  ## match -- IPv4-mapped IPv6 ('[::ffff:127.0.0.1]') and /etc/hosts aliases
+  ## ('ip6-localhost') -- are handed to the SOCKS proxy, which Tor refuses for
+  ## loopback, so they fail fast and visibly (never a leak; the Gateway torifies
+  ## regardless). https://www.whonix.org/wiki/Stream_Isolation
   extra_curl_args=(
     '--proxy' "socks5h://${curl_proxy_addr}/"
     '--proxy-user' "<torS0X>0:curl-wrapper_${random_socks_password}"
+    '--noproxy' 'localhost,127.0.0.0/8,::1'
   )
 
   curl_args=( "${extra_curl_args[@]}" "${curl_args[@]}" )
