@@ -157,11 +157,12 @@ main() {
   fi
 
   if [ -n "${curl_binary}" ]; then
-    ## --disable (first arg) so the probe ignores the user's ~/.curlrc -- a
-    ## setting there must not spuriously fail the check and drop stream
-    ## isolation. 'timeout' hard-caps a wedged probe (a stronger external
-    ## guarantee than curl's own --max-time).
-    if ! timeout --kill-after=10 10 "${curl_binary}" --disable "http://${curl_proxy_addr}/" --output /dev/null 2>/dev/null; then
+    ## The probe must reach the local Tor port DIRECTLY so user config cannot
+    ## spuriously fail it and drop stream isolation: --disable (first arg)
+    ## ignores ~/.curlrc and --noproxy '*' overrides any proxy env var
+    ## (ALL_PROXY/http_proxy/...) that would otherwise route the probe through a
+    ## proxy. 'timeout' hard-caps a wedged probe (stronger than curl --max-time).
+    if ! timeout --kill-after=10 10 "${curl_binary}" --disable --noproxy '*' "http://${curl_proxy_addr}/" --output /dev/null 2>/dev/null; then
       printf '%s\n' "WARNING: Tor proxy doesn't seem to be functional. Stream isolation will be disabled." 1>&2
       disable_stream_isolation='true'
     fi
