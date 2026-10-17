@@ -197,6 +197,11 @@ main() {
     '--noproxy' 'localhost,127.0.0.0/8,::1'
   )
 
+  ## The injected proxy applies to a SINGLE target. curl resets options at a
+  ## literal '--next', so a multi-request invocation ('url1 --next url2') stream-
+  ## isolates only the FIRST segment; later segments are deliberately NOT covered
+  ## (no argv gymnastics to re-inject per segment). Not a leak on Whonix -- the
+  ## Gateway torifies regardless; the later segments just share a Tor circuit.
   curl_args=( "${extra_curl_args[@]}" "${curl_args[@]}" )
 
   exec_uwtwrapper "${curl_args[@]}"
