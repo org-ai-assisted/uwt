@@ -210,23 +210,23 @@ read_date_file() {
    ## value ("08", "012") bypasses is_whole_number (only the nodigits guard above
    ## runs) and bash arithmetic would read it as octal -- "08"/"09" abort the
    ## script ("value too great for base"), "012" silently becomes 10.
-   seconds_count="$(( 10#$seconds_count + $_increment ))"
-   if [ "$seconds_count" -ge "60" ]; then
-      seconds_count="0"
-
-      MINUTES="$(( 10#$MINUTES + 1 ))"
-      if [ "$MINUTES" -ge "60" ]; then
-         MINUTES="0"
-
-         HOURS="$(( 10#$HOURS + 1 ))"
-         if [ "$HOURS" -ge "24" ]; then
-            HOURS="0"
-         fi
+   ## Modulo carry: _increment is NOT upper-bounded (-i / -r take any whole
+   ## number), so a single overflow can span many minutes/hours. Resetting to 0
+   ## and bumping one unit would drop the remainder and cap accumulation at ~1
+   ## minute per call, defeating large -i / -r values.
+   local total_seconds total_minutes minutes_carry hours_carry
+   total_seconds="$(( 10#$seconds_count + $_increment ))"
+   seconds_count="$(( total_seconds % 60 ))"
+   minutes_carry="$(( total_seconds / 60 ))"
+   if [ "$minutes_carry" -gt 0 ]; then
+      total_minutes="$(( 10#$MINUTES + minutes_carry ))"
+      MINUTES="$(( total_minutes % 60 ))"
+      hours_carry="$(( total_minutes / 60 ))"
+      if [ "$hours_carry" -gt 0 ]; then
+         HOURS="$(( ( 10#$HOURS + hours_carry ) % 24 ))"
          printf '%s\n' "$HOURS" > "$HOURS_FILE"
-
       fi
       printf '%s\n' "$MINUTES" > "$MINUTES_FILE"
-
    fi
 
    printf '%s\n' "$seconds_count" > "$SECONDS_FILE"
