@@ -31,10 +31,12 @@ Example: $SCRIPTNAME -d 30 -m 12 -y 2013 -i 10 -f /tmp/${SCRIPTNAME}test
          sudo $SCRIPTNAME -d 30 -m 12 -y 2013 -r -f /tmp/${SCRIPTNAME}test"
 }
 
-## Date components are zero-padded ('date +%d' yields '05', '09') and passed
+## Month/day are zero-padded ('date +%m'/'+%d' yield '05', '09') and passed
 ## verbatim to faketime, never used in arithmetic, so a leading zero is valid --
 ## is_whole_number (which rejects leading zeros) must NOT gate them, else the
-## default date breaks on days/months 01-09.
+## default date breaks on days/months 01-09. The YEAR keeps is_whole_number: it
+## is always 4-digit ('date +%Y'), needs no leading zero, and a 2-digit value
+## like '01' would be windowed by faketime to 2001 rather than year 1.
 is_digit_string() {
    case "${1}" in
       ''|*[!0-9]*) return 1 ;;
@@ -142,7 +144,7 @@ if [ "${#_increment}" -gt 2 ] || [ "$_increment" -gt 60 ]; then
    exit 1
 fi
 
-if ! is_digit_string "$_year"; then
+if ! is_whole_number "$_year"; then
    printf '%s\n' "year is not a digit."
    exit 1
 fi
