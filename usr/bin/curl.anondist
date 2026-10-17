@@ -46,6 +46,46 @@ exec_uwtwrapper() {
   exec /usr/libexec/uwt/uwtwrapper "$@"
 }
 
+## Return 0 if the argument targets a loopback host, else 1. The host is
+## EXTRACTED the way curl's URL authority grammar works, rather than pattern-
+## matched against the raw token: the authority ends at the first '/', '?' or
+## '#'; userinfo is split off at the LAST '@'; an IPv6 host is '['-bracketed.
+## Classifying the CLEAN host (not the raw argument) is what keeps a loopback
+## literal in a path/query/fragment, or as the userinfo of a remote host, from
+## matching, while a real loopback behind userinfo ('http://u:p@127.0.0.1/')
+## still matches. A leading '-' is an option flag, never a destination.
+## RESIDUALS (host extraction is exact-match, argv is not fully parsed):
+##   FALSE NEGATIVE (loopback not matched -> handed to the SOCKS proxy, which Tor
+##   refuses for loopback, so it fails fast and visibly -- never a leak):
+##     127.1 / 0x7f000001 / 0177.0.0.1   (alternate IPv4 spellings)
+##     [::0001] / [::ffff:127.0.0.1]     (alternate / IPv4-mapped IPv6)
+##     LOCALHOST                         (match is case-sensitive)
+##     foo.localhost / localhost.        (RFC 6761 sub-names / trailing dot)
+##     ip6-localhost                     (an /etc/hosts alias, not a literal)
+##   FALSE POSITIVE (remote treated as loopback -> still works, just shares a
+##   circuit instead of an isolated one; still torified, no leak):
+##     curl -d localhost https://remote/ (loopback as a separate OPTION-ARGUMENT
+##                                        token, indistinguishable from an operand)
+##     curl http://a/ http://localhost/  (multi-URL/--next: one decision covers
+##                                        the whole invocation, so both lose isolation)
+arg_targets_loopback() {
+  local arg="$1" authority host
+  case "${arg}" in
+    -*) return 1 ;;
+  esac
+  authority="${arg#*://}"
+  authority="${authority%%[/?#]*}"
+  authority="${authority##*@}"
+  case "${authority}" in
+    \[*\]*) host="${authority#\[}"; host="${host%%\]*}" ;;
+    *) host="${authority%%:*}" ;;
+  esac
+  case "${host}" in
+    localhost|::1) return 0 ;;
+  esac
+  [[ "${host}" =~ ^127\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
+}
+
 main() {
   ## Save the caller's LC_ALL before forcing C, so exec_uwtwrapper can restore it.
   uwt_caller_lc_all="${LC_ALL:-}"
@@ -97,18 +137,6 @@ main() {
   disable_stream_isolation='false'
   found_ipv6_arg='false'
 
-  ## A loopback DESTINATION (not merely a token containing a loopback literal).
-  ## The literal must sit at the HOST position of a URL authority:
-  ##   [scheme://] [userinfo@] HOST [:port] (/ | ? | # | end-of-token)
-  ## Optional 'userinfo@' is skipped so 'http://user:pw@127.0.0.1/' matches on the
-  ## real host, while 'http://localhost:pw@example.com/' does NOT (there 'localhost'
-  ## is the username; the port must be numeric, so ':pw@' forces it to parse as
-  ## userinfo and the host is the remote). Anchoring also keeps a remote URL whose
-  ## PATH/QUERY contains '127.x'/'localhost' (or a 'localhost.evil.com' host) from
-  ## matching, and an option flag ('-x') starts with neither a scheme letter nor a
-  ## loopback literal, so flags are skipped without a separate guard.
-  loopback_host_re='^([a-zA-Z][a-zA-Z0-9+.-]*://)?([^/@]*@)?(\[::1\]|127\.[0-9]+\.[0-9]+\.[0-9]+|localhost)(:[0-9]+)?([/?#]|$)'
-
   for curl_arg in "${curl_args[@]}"; do
     ## Unfortunately curl's argument parser makes it impossible to determine
     ## what is an option, what is an argument to an option, and what is a URL,
@@ -137,27 +165,9 @@ main() {
       disable_stream_isolation='true'
     fi
     ## Skip stream isolation for a loopback DESTINATION -- not a leak: a loopback
-    ## request never leaves the host, so there is no Tor circuit to isolate.
-    ## Matches 127.0.0.0/8, IPv6 [::1] and 'localhost' at the host position. argv
-    ## cannot be fully parsed without replicating curl's option table and URL
-    ## grammar, so some edge cases stay misclassified; both directions are
-    ## low-impact by design (on Whonix the Gateway torifies regardless):
-    ##   FALSE NEGATIVE (loopback not matched -> handed to the SOCKS proxy, which
-    ##   Tor refuses for loopback, so it fails fast and visibly -- never a leak):
-    ##     127.1 / 0x7f000001 / 0177.0.0.1   (alternate IPv4 spellings)
-    ##     [::0001] / [::ffff:127.0.0.1]     (alternate / IPv4-mapped IPv6)
-    ##     LOCALHOST                         (match is case-sensitive)
-    ##     foo.localhost / localhost.        (RFC 6761 sub-names / trailing dot)
-    ##     ip6-localhost                     (an /etc/hosts alias, not a literal)
-    ##     --resolve host:port:127.0.0.1     (loopback hidden in an option arg)
-    ##     http://{localhost,a}/             (curl URL glob)
-    ##   FALSE POSITIVE (remote treated as loopback -> still works, just shares a
-    ##   circuit instead of an isolated one; still torified, no leak):
-    ##     curl -d localhost https://remote/ (loopback literal as an OPTION
-    ##                                        ARGUMENT, indistinguishable from an operand)
-    ##     curl http://a/ http://localhost/  (multi-URL/--next: one decision covers
-    ##                                        the whole invocation, so both lose isolation)
-    if [[ "${curl_arg}" =~ ${loopback_host_re} ]]; then
+    ## request never leaves the host, so there is no Tor circuit to isolate (the
+    ## residual misclassifications are enumerated at arg_targets_loopback).
+    if arg_targets_loopback "${curl_arg}"; then
       printf '%s\n' "NOTE: Detected loopback address. Stream isolation will be disabled." 1>&2
       disable_stream_isolation='true'
     fi
