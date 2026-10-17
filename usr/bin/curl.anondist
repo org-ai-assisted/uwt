@@ -10,11 +10,14 @@
 ## curl tor wrapper
 #### meta end
 
-## NOTE: curl is incompatible with torsocks; it will not resolve .onion
-## addresses if used with torsocks, and DNS will break completely if using IPv6
-## with torsocks, thus we instead instruct curl to connect to a Tor proxy
-## itself. We randomize the proxy username and password for each invocation so
-## Tor will provide stream isolation.
+## NOTE: curl refuses to resolve a .onion hostname via the system resolver
+## (RFC 7686), short-circuiting before getaddrinfo -- so a getaddrinfo/LD_PRELOAD
+## torifier (torsocks, proxychains) can NEVER reach .onion with curl, regardless
+## of its hooks. curl resolves .onion ONLY when it hands the hostname to a SOCKS
+## proxy itself (socks5h) for remote resolution, so we inject '--proxy
+## socks5h://...' rather than wrap with torsocks. We randomize the proxy username
+## and password per invocation so Tor provides stream isolation (IsolateSOCKSAuth,
+## the same lever torsocks' IsolatePID uses).
 
 ## provides was_executed
 # shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/check_runtime.bsh
