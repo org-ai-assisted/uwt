@@ -98,13 +98,16 @@ main() {
   found_ipv6_arg='false'
 
   ## A loopback DESTINATION (not merely a token containing a loopback literal).
-  ## The literal must sit at the host position: token start, or right after a
-  ## 'scheme://', and be followed by a port/path/query delimiter or end of token.
-  ## This anchoring keeps a remote URL whose PATH or QUERY happens to contain
-  ## '127.x'/'localhost' (or a 'localhost.example.com' host) from matching, and a
-  ## leading '-' (an option flag) never starts with a scheme letter or a loopback
-  ## literal, so flags are skipped without a separate guard.
-  loopback_host_re='^([a-zA-Z][a-zA-Z0-9+.-]*://)?(\[::1\]|127\.[0-9]+\.[0-9]+\.[0-9]+|localhost)([:/?#]|$)'
+  ## The literal must sit at the HOST position of a URL authority:
+  ##   [scheme://] [userinfo@] HOST [:port] (/ | ? | # | end-of-token)
+  ## Optional 'userinfo@' is skipped so 'http://user:pw@127.0.0.1/' matches on the
+  ## real host, while 'http://localhost:pw@example.com/' does NOT (there 'localhost'
+  ## is the username; the port must be numeric, so ':pw@' forces it to parse as
+  ## userinfo and the host is the remote). Anchoring also keeps a remote URL whose
+  ## PATH/QUERY contains '127.x'/'localhost' (or a 'localhost.evil.com' host) from
+  ## matching, and an option flag ('-x') starts with neither a scheme letter nor a
+  ## loopback literal, so flags are skipped without a separate guard.
+  loopback_host_re='^([a-zA-Z][a-zA-Z0-9+.-]*://)?([^/@]*@)?(\[::1\]|127\.[0-9]+\.[0-9]+\.[0-9]+|localhost)(:[0-9]+)?([/?#]|$)'
 
   for curl_arg in "${curl_args[@]}"; do
     ## Unfortunately curl's argument parser makes it impossible to determine
@@ -136,14 +139,18 @@ main() {
     ## Skip stream isolation for a loopback DESTINATION -- not a leak: a loopback
     ## request never leaves the host, so there is no Tor circuit to isolate.
     ## Matches 127.0.0.0/8, IPv6 [::1] and 'localhost' at the host position. argv
-    ## cannot be fully parsed without replicating curl's option table, so some
-    ## edge cases stay misclassified; both directions are low-impact by design:
+    ## cannot be fully parsed without replicating curl's option table and URL
+    ## grammar, so some edge cases stay misclassified; both directions are
+    ## low-impact by design (on Whonix the Gateway torifies regardless):
     ##   FALSE NEGATIVE (loopback not matched -> handed to the SOCKS proxy, which
     ##   Tor refuses for loopback, so it fails fast and visibly -- never a leak):
     ##     127.1 / 0x7f000001 / 0177.0.0.1   (alternate IPv4 spellings)
-    ##     [::0001] / [::ffff:7f00:1]        (alternate IPv6 spellings)
+    ##     [::0001] / [::ffff:127.0.0.1]     (alternate / IPv4-mapped IPv6)
     ##     LOCALHOST                         (match is case-sensitive)
-    ##     http://user@localhost/            (userinfo before the host)
+    ##     foo.localhost / localhost.        (RFC 6761 sub-names / trailing dot)
+    ##     ip6-localhost                     (an /etc/hosts alias, not a literal)
+    ##     --resolve host:port:127.0.0.1     (loopback hidden in an option arg)
+    ##     http://{localhost,a}/             (curl URL glob)
     ##   FALSE POSITIVE (remote treated as loopback -> still works, just shares a
     ##   circuit instead of an isolated one; still torified, no leak):
     ##     curl -d localhost https://remote/ (loopback literal as an OPTION
