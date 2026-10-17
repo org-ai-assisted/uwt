@@ -62,6 +62,7 @@ exec_uwtwrapper() {
 ##     LOCALHOST                         (match is case-sensitive)
 ##     foo.localhost / localhost.        (RFC 6761 sub-names / trailing dot)
 ##     ip6-localhost                     (an /etc/hosts alias, not a literal)
+##     curl 'http://{localhost,a}/'      (curl URL glob -- needs glob expansion)
 ##   FALSE POSITIVE (remote treated as loopback -> still works, just shares a
 ##   circuit instead of an isolated one; still torified, no leak):
 ##     curl -d localhost https://remote/ (loopback as a separate OPTION-ARGUMENT
