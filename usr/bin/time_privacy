@@ -98,6 +98,11 @@ elif [ "$_increment" = "none" ]; then
    if ! is_whole_number "$_randomincrement"; then
       printf '%s\n' "randomincrement must be a positive number."
       exit 1
+   elif [ "${#_randomincrement}" -gt 2 ] || [ "$_randomincrement" -gt 60 ]; then
+      ## Length guard first: a value too large for bash arithmetic (> INT64_MAX)
+      ## would WRAP to a negative in a bare '-gt 60' and slip through.
+      printf '%s\n' "randomincrement must be between 1 and 60."
+      exit 1
    else
       random_number="$("${HELPER_SCRIPTS_PATH:-}/usr/libexec/helper-scripts/random-between" 1 "$_randomincrement")"
       _increment="$random_number"
@@ -113,6 +118,14 @@ fi
 
 if ! is_whole_number "$_increment"; then
    printf '%s\n' "increment is not a digit."
+   exit 1
+fi
+
+## Enforce the documented 0-60 range. Length guard first: a value too large for
+## bash arithmetic (> INT64_MAX) WRAPS to a negative, so a bare '-gt 60' would
+## pass it through and the carry below would store a negative/garbage time.
+if [ "${#_increment}" -gt 2 ] || [ "$_increment" -gt 60 ]; then
+   printf '%s\n' "increment must be between 0 and 60."
    exit 1
 fi
 
@@ -210,20 +223,18 @@ read_date_file() {
    ## value ("08", "012") bypasses is_whole_number (only the nodigits guard above
    ## runs) and bash arithmetic would read it as octal -- "08"/"09" abort the
    ## script ("value too great for base"), "012" silently becomes 10.
-   ## Modulo carry: _increment is NOT upper-bounded (-i / -r take any whole
-   ## number), so a single overflow can span many minutes/hours. Resetting to 0
-   ## and bumping one unit would drop the remainder and cap accumulation at ~1
-   ## minute per call, defeating large -i / -r values.
-   local total_seconds total_minutes minutes_carry hours_carry
+   ## The increment is bounded to 0-60 (validated above) and the prior seconds
+   ## are 0-59, so the sum carries at most one minute. Preserve the seconds
+   ## remainder (total % 60) -- the old reset-to-0 dropped it and capped
+   ## accumulation at ~1 minute per call.
+   local total_seconds
    total_seconds="$(( 10#$seconds_count + $_increment ))"
    seconds_count="$(( total_seconds % 60 ))"
-   minutes_carry="$(( total_seconds / 60 ))"
-   if [ "$minutes_carry" -gt 0 ]; then
-      total_minutes="$(( 10#$MINUTES + minutes_carry ))"
-      MINUTES="$(( total_minutes % 60 ))"
-      hours_carry="$(( total_minutes / 60 ))"
-      if [ "$hours_carry" -gt 0 ]; then
-         HOURS="$(( ( 10#$HOURS + hours_carry ) % 24 ))"
+   if [ "$total_seconds" -ge 60 ]; then
+      MINUTES="$(( 10#$MINUTES + 1 ))"
+      if [ "$MINUTES" -ge 60 ]; then
+         MINUTES=0
+         HOURS="$(( ( 10#$HOURS + 1 ) % 24 ))"
          printf '%s\n' "$HOURS" > "$HOURS_FILE"
       fi
       printf '%s\n' "$MINUTES" > "$MINUTES_FILE"
